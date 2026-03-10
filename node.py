@@ -229,3 +229,134 @@ class NodoInstruccion(NodoAST):
             args = ", ".join(f'"{a}"' if isinstance(a, str) else a.traducirRust() for a in self.argumentos_instruccion)
             return f'println!("{{}}", {args});'
         return ""
+    
+class NodoPrint(NodoAST):
+    """
+    Nodo para:
+      print("texto")      →  sin salto de línea
+      println("texto")    →  con salto de línea
+    """
+    def __init__(self, tipo_print, argumentos):
+        # tipo_print: token KEYWORD con valor 'print' o 'println'
+        self.tipo_print = tipo_print
+        self.argumentos = argumentos  # lista de strings / nodos
+
+    def traducirPy(self):
+        args = ", ".join(f'"{a}"' if isinstance(a, str) else a.traducirPy() for a in self.argumentos)
+        if self.tipo_print[1] == "println":
+            return f"print({args})"          # print en Python ya agrega \n
+        else:
+            return f"print({args}, end='')"  # sin salto
+
+    def traducirRuby(self):
+        args = " ".join(a if isinstance(a, str) else a.traducirRuby() for a in self.argumentos)
+        if self.tipo_print[1] == "println":
+            return f'puts "{args}"'
+        else:
+            return f'print "{args}"'
+
+    def traducirRust(self):
+        args = ", ".join(f'"{a}"' if isinstance(a, str) else a.traducirRust() for a in self.argumentos)
+        if self.tipo_print[1] == "println":
+            return f'println!("{{}}", {args});'
+        else:
+            return f'print!("{{}}", {args});'
+
+
+class NodoWhile(NodoAST):
+    """
+    Nodo para:
+      while (condicion) { cuerpo }
+    """
+    def __init__(self, condicion, cuerpo):
+        self.condicion = condicion
+        self.cuerpo = cuerpo
+
+    def traducirPy(self):
+        cond = self.condicion.traducirPy()
+        cuerpo = "\n    ".join(c.traducirPy() for c in self.cuerpo)
+        return f"while {cond}:\n    {cuerpo}"
+
+    def traducirRuby(self):
+        cond = self.condicion.traducirRuby()
+        cuerpo = "\n  ".join(c.traducirRuby() for c in self.cuerpo)
+        return f"while {cond}\n  {cuerpo}\nend"
+
+    def traducirRust(self):
+        cond = self.condicion.traducirRust()
+        cuerpo = "\n    ".join(c.traducirRust() for c in self.cuerpo)
+        return f"while {cond} {{\n    {cuerpo}\n}}"
+
+
+class NodoFor(NodoAST):
+    """
+    Nodo para:
+      for (inicio; condicion; incremento) { cuerpo }
+    """
+    def __init__(self, inicio, condicion, incremento, cuerpo):
+        self.inicio = inicio          # NodoAsignacion (sin tipo, reutilizamos)
+        self.condicion = condicion    # NodoOperacion / NodoIdent
+        self.incremento = incremento  # string con la expresión de incremento
+        self.cuerpo = cuerpo
+
+    def traducirPy(self):
+        # Python no tiene for C-style; lo convertimos a while
+        inicio = self.inicio.traducirPy()
+        cond = self.condicion.traducirPy()
+        inc = self.incremento
+        cuerpo = "\n    ".join(c.traducirPy() for c in self.cuerpo)
+        return f"{inicio}\nwhile {cond}:\n    {cuerpo}\n    {inc}"
+
+    def traducirRuby(self):
+        inicio = self.inicio.traducirRuby()
+        cond = self.condicion.traducirRuby()
+        inc = self.incremento
+        cuerpo = "\n  ".join(c.traducirRuby() for c in self.cuerpo)
+        return f"{inicio}\nwhile {cond}\n  {cuerpo}\n  {inc}\nend"
+
+    def traducirRust(self):
+        inicio = self.inicio.traducirRust()
+        cond = self.condicion.traducirRust()
+        inc = self.incremento
+        cuerpo = "\n    ".join(c.traducirRust() for c in self.cuerpo)
+        return f"{inicio}\nwhile {cond} {{\n    {cuerpo}\n    {inc};\n}}"
+
+
+class NodoIf(NodoAST):
+    """
+    Nodo para:
+      if (condicion) { cuerpo_if }
+      if (condicion) { cuerpo_if } else { cuerpo_else }
+    """
+    def __init__(self, condicion, cuerpo_if, cuerpo_else=None):
+        self.condicion = condicion
+        self.cuerpo_if = cuerpo_if
+        self.cuerpo_else = cuerpo_else  # puede ser None
+
+    def traducirPy(self):
+        cond = self.condicion.traducirPy()
+        cuerpo_if = "\n    ".join(c.traducirPy() for c in self.cuerpo_if)
+        resultado = f"if {cond}:\n    {cuerpo_if}"
+        if self.cuerpo_else:
+            cuerpo_else = "\n    ".join(c.traducirPy() for c in self.cuerpo_else)
+            resultado += f"\nelse:\n    {cuerpo_else}"
+        return resultado
+
+    def traducirRuby(self):
+        cond = self.condicion.traducirRuby()
+        cuerpo_if = "\n  ".join(c.traducirRuby() for c in self.cuerpo_if)
+        resultado = f"if {cond}\n  {cuerpo_if}"
+        if self.cuerpo_else:
+            cuerpo_else = "\n  ".join(c.traducirRuby() for c in self.cuerpo_else)
+            resultado += f"\nelse\n  {cuerpo_else}"
+        resultado += "\nend"
+        return resultado
+
+    def traducirRust(self):
+        cond = self.condicion.traducirRust()
+        cuerpo_if = "\n    ".join(c.traducirRust() for c in self.cuerpo_if)
+        resultado = f"if {cond} {{\n    {cuerpo_if}\n}}"
+        if self.cuerpo_else:
+            cuerpo_else = "\n    ".join(c.traducirRust() for c in self.cuerpo_else)
+            resultado += f" else {{\n    {cuerpo_else}\n}}"
+        return resultado
