@@ -1,37 +1,36 @@
 from lexico import identificar_tokens
 from sintactico import Parser, imprimir_ast
 import json
+import subprocess
+import os
+
+def compilar(archivo_asm):
+    nombre = archivo_asm.replace(".asm", "")
+    archivo_obj = nombre + ".o"
+    resultado_nasm = subprocess.run(
+        ["nasm", "-f", "elf32", archivo_asm, "-o", archivo_obj],
+        capture_output=True, text=True
+    )
+    if resultado_nasm.returncode != 0:
+        print("Error en nasm:")
+        print(resultado_nasm.stderr)
+        return
+    resultado_ld = subprocess.run(
+        ["ld", "-m", "elf_i386", archivo_obj, "-o", nombre],
+        capture_output=True, text=True
+    )
+    if resultado_ld.returncode != 0:
+        print("Error en ld:")
+        print(resultado_ld.stderr)
+        return
+    print(f"Compilado exitosamente: {nombre}")
 
 def main():
     codigo = """
-    int suma(int a, int b) {
-        int c = a + b;
-        cout << "Resultado";
-        return c;
-    }
-
     int main() {
-        int x = 5;
-        int y = 10;
-
-        print("Iniciando programa");
+        print("Hola mundo");
         println("Bienvenido al compilador");
-
-        if (x < y) {
-            println("x es menor que y");
-        } else {
-            println("x es mayor o igual que y");
-        }
-
-        while (x < y) {
-            println("dentro del while");
-            int x = x + 1;
-        }
-
-        for (int i = 0; i < 5; i = i + 1) {
-            println("iteracion del for");
-        }
-
+        println("Fin del programa");
         return 0;
     }
     """
@@ -43,10 +42,20 @@ def main():
     print("=== AST ===")
     print(json.dumps(imprimir_ast(ast), indent=2, ensure_ascii=False))
 
-    print("\n=== TRADUCCIÓN A RUBY ===")
+    print("\n=== TRADUCCION A RUBY ===")
     for func in ast.funciones:
         print(func.traducirRuby())
     if ast.main:
         print(ast.main.traducirRuby())
+
+    print("\n=== CODIGO ENSAMBLADOR ===")
+    asm = ast.generarCodigo()
+    print(asm)
+
+    with open("salida.asm", "w") as f:
+        f.write(asm)
+
+    print("\n=== COMPILANDO CON NASM Y LD ===")
+    compilar("salida.asm")
 
 main()

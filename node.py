@@ -8,27 +8,55 @@ class NodoPrograma(NodoAST):
         self.main = main
 
     def generarCodigo(self):
-        codigo = ["section .text", "global_start"]
-        data = ["section .bss"]
+        data_text = ["section .data"]
+        data_bss = ["section .bss"]
+        codigo = ["section .text", "global _start"]
+
+        def recolectar_prints(instrucciones):
+            for inst in instrucciones:
+                if isinstance(inst, NodoPrint):
+                    data_text.append(inst.obtenerDato())
+                elif isinstance(inst, NodoWhile):
+                    recolectar_prints(inst.cuerpo)
+                elif isinstance(inst, NodoFor):
+                    recolectar_prints(inst.cuerpo)
+                elif isinstance(inst, NodoIf):
+                    recolectar_prints(inst.cuerpo_if)
+                    if inst.cuerpo_else:
+                        recolectar_prints(inst.cuerpo_else)
+
         for funcion in self.funciones:
             codigo.append(funcion.generarCodigo())
-            self.variables.append((funcion.cuerpo[0].tipo[1], funcion.cuerpo[0].nombre[1]))
+            if funcion.cuerpo and hasattr(funcion.cuerpo[0], 'tipo'):
+                self.variables.append((funcion.cuerpo[0].tipo[1], funcion.cuerpo[0].nombre[1]))
             if len(funcion.parametros) > 0:
                 for parametro in funcion.parametros:
                     self.variables.append((parametro.tipo[1], parametro.nombre[1]))
-        codigo.append("_start:")
-        codigo.append(self.main.generarCodigo())
-        codigo.append("     mov eax, 1")
-        codigo.append("     xor ebx, ebx")
-        codigo.append("     int 0x80")
+            recolectar_prints(funcion.cuerpo)
+
+        if self.main:
+            recolectar_prints(self.main.cuerpo)
+
         for variable in self.variables:
             if variable[0] == "int":
-                data.append(f"    {variable[1]}: resd 1")
+                data_bss.append(f"    {variable[1]}: resd 1")
             elif variable[0] == "float":
-                data.append(f"     {variable[1]}: resq 1")
-        codigo = "\n".join(codigo)
-        data = "\n".join(data)
-        return f"{data}\n{codigo}"
+                data_bss.append(f"    {variable[1]}: resq 1")
+
+        codigo.append("_start:")
+        if self.main:
+            codigo.append(f"    call main")
+        codigo.append("    mov eax, 1")
+        codigo.append("    xor ebx, ebx")
+        codigo.append("    int 0x80")
+
+        if self.main:
+            codigo.append(self.main.generarCodigo())
+
+        resultado = "\n".join(data_text) + "\n"
+        resultado += "\n".join(data_bss) + "\n"
+        resultado += "\n".join(codigo)
+        return resultado
 
     def traducirRust(self):
         rust_code = []
@@ -238,9 +266,31 @@ class NodoInstruccion(NodoAST):
 
 
 class NodoPrint(NodoAST):
+    _contador = 0
+
     def __init__(self, tipo_print, argumentos):
         self.tipo_print = tipo_print
         self.argumentos = argumentos
+        NodoPrint._contador += 1
+        self.etiqueta = f"msg_{NodoPrint._contador}"
+
+    def generarCodigo(self):
+        texto = self.argumentos[0] if self.argumentos else ""
+        longitud = len(texto) + (1 if self.tipo_print[1] == "println" else 0)
+        codigo = []
+        codigo.append(f"    mov eax, 4")
+        codigo.append(f"    mov ebx, 1")
+        codigo.append(f"    mov ecx, {self.etiqueta}")
+        codigo.append(f"    mov edx, {longitud}")
+        codigo.append(f"    int 0x80")
+        return "\n".join(codigo)
+
+    def obtenerDato(self):
+        texto = self.argumentos[0] if self.argumentos else ""
+        if self.tipo_print[1] == "println":
+            return f'    {self.etiqueta} db "{texto}", 10'
+        else:
+            return f'    {self.etiqueta} db "{texto}"'
 
     def traducirPy(self):
         args = ", ".join(f'"{a}"' if isinstance(a, str) else a.traducirPy() for a in self.argumentos)
