@@ -6,7 +6,7 @@ def main():
     codigo = """
     int suma(int a, int b) {
         int c = a + b;
-        cout << "Resultado: ";
+        cout << "Resultado";
         return c;
     }
 
@@ -37,13 +37,16 @@ def main():
     """
 
     tokens = identificar_tokens(codigo)
-    print("TOKENS ENCONTRADOS")
-    for t in tokens:
-        print(t)
-
-    print("\n ARBOL SINTÁCTICO (AST)")
     parser = Parser(tokens)
     ast = parser.parsear()
+
+    print("=== AST ===")
     print(json.dumps(imprimir_ast(ast), indent=2, ensure_ascii=False))
+
+    print("\n=== TRADUCCIÓN A RUBY ===")
+    for func in ast.funciones:
+        print(func.traducirRuby())
+    if ast.main:
+        print(ast.main.traducirRuby())
 
 main()

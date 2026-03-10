@@ -1,6 +1,4 @@
 import re
-import pandas as pd
-from PyPDF2 import PdfReader
 
 # === Análisis Léxico ===
 # Definir los patrones para los diferentes tipos de tokens
@@ -21,23 +19,7 @@ def identificar_tokens(texto):
     tokens_encontrados = []
     for match in patron_regex.finditer(texto):
         for token, valor in match.groupdict().items():
-            if valor is not None and token != "WHITESPACE": # Ignoramos espacios en blanco
+            if valor is not None and token != "WHITESPACE":  # Ignoramos espacios en blanco
                 tokens_encontrados.append((token, valor))
 
     return tokens_encontrados
-
-
-
-# Implementar el analizador de los tokens
-#def parse(tokens):
-    # Funcion auxiliar para consumir cada token
-    def consume(tipo_esperado):
-        global token_actual
-        if token_actual[1] == tipo_esperado:
-            global indice_token
-            token_actual = tokens[indice_token]
-            indice_token += 1
-        else: # NO es el token esperado
-            raise SyntaxError(f"Se esperaba {tipo_esperado} pero se encontro {token_actual[0]}")
-        
-

@@ -24,7 +24,6 @@ class Parser:
     def parsear(self):
         return self.construccion_programa()
 
-    #Programa
     def construccion_programa(self):
         funciones = []
         main_node = None
@@ -36,22 +35,20 @@ class Parser:
                 funciones.append(func_actual)
         return NodoPrograma(funciones, main_node)
 
-    #Función 
     def funcion(self):
         tipo_retorno = self.coincidir('KEYWORD')
         nombre_funcion = self.coincidir('IDENTIFIER')
-        self.coincidir('DELIMITER')  # (
+        self.coincidir('DELIMITER')
         parametros = []
         if nombre_funcion[1] != "main":
             if self.obtener_token() and self.obtener_token()[1] != ")":
                 parametros = self.parametros()
-        self.coincidir('DELIMITER')  # )
-        self.coincidir('DELIMITER')  # {
+        self.coincidir('DELIMITER')
+        self.coincidir('DELIMITER')
         cuerpo = self.cuerpo()
-        self.coincidir('DELIMITER')  # }
+        self.coincidir('DELIMITER')
         return NodoFuncion(tipo_retorno, nombre_funcion, parametros, cuerpo)
 
-    # Parámetros
     def parametros(self):
         lista_parametros = []
         tipo = self.coincidir("KEYWORD")
@@ -64,52 +61,40 @@ class Parser:
             lista_parametros.append(NodoParametro(tipo, nombre))
         return lista_parametros
 
-    #Cuerpo 
     def cuerpo(self):
         instrucciones = []
         while self.obtener_token() and self.obtener_token()[1] != '}':
             token_actual = self.obtener_token()
-
             if token_actual[1] == 'return':
                 instrucciones.append(self.retorno())
-
             elif token_actual[1] == 'cout':
                 instrucciones.append(self.impresionPantalla())
-
             elif token_actual[1] in ('print', 'println'):
                 instrucciones.append(self.instruccionPrint())
-
             elif token_actual[1] == 'while':
                 instrucciones.append(self.instruccionWhile())
-
             elif token_actual[1] == 'for':
                 instrucciones.append(self.instruccionFor())
-
             elif token_actual[1] == 'if':
                 instrucciones.append(self.instruccionIf())
-
             else:
                 instrucciones.append(self.asignacion())
-
         return instrucciones
 
-    #Asignación
     def asignacion(self):
         tipo = self.coincidir('KEYWORD')
         nombre = self.coincidir('IDENTIFIER')
         operador = self.coincidir('OPERATOR')
         expresion = self.expresion()
-        self.coincidir('DELIMITER')  # ;
+        self.coincidir('DELIMITER')
         return NodoAsignacion(tipo, nombre, expresion)
 
-    # Retorno
     def retorno(self):
         self.coincidir('KEYWORD')
         expresion = self.expresion()
-        self.coincidir('DELIMITER')  # ;
+        self.coincidir('DELIMITER')
         return NodoRetorno(expresion)
 
-    #Expresión 
     def expresion(self):
         izquierda = self.termino()
         while self.obtener_token() and self.obtener_token()[0] == "OPERATOR":
@@ -118,7 +103,6 @@ class Parser:
             izquierda = NodoOperacion(izquierda, operador, derecha)
         return izquierda
 
-    # Término 
     def termino(self):
         token = self.obtener_token()
         if token and token[0] == "NUMBER":
@@ -137,7 +121,6 @@ class Parser:
         else:
             raise SyntaxError(f"Expresión no válida: {token}")
 
-    # ─── Llamada a función ───────────────────────────────────
     def llamadaFuncion(self):
         argumentos = []
         sigue = True
@@ -158,114 +141,81 @@ class Parser:
         return argumentos
 
     def impresionPantalla(self):
-        keyword = self.coincidir("KEYWORD")   # reconocido como KEYWORD
-        self.coincidir("OPERATOR")            # <<
-        delimitador_apertura = self.coincidir("DELIMITER")  # " o '
+        keyword = self.coincidir("KEYWORD")
+        self.coincidir("OPERATOR")
+        delimitador_apertura = self.coincidir("DELIMITER")
         char_cierre = delimitador_apertura[1]
         contenido = []
         while self.obtener_token() and self.obtener_token()[1] != char_cierre:
             contenido.append(self.obtener_token()[1])
             self.pos += 1
-        self.coincidir("DELIMITER")  # cierre de cadena
-        self.coincidir("DELIMITER")  # ;
+        self.coincidir("DELIMITER")
+        self.coincidir("DELIMITER")
         return NodoInstruccion(keyword, [" ".join(contenido)])
 
-    #print("...") ; / println("...") ;
     def instruccionPrint(self):
-        """
-        Reconoce:
-            print("texto");
-            println("texto");
-        """
-        keyword = self.coincidir("KEYWORD")   # print / println
-        self.coincidir("DELIMITER")           # (
-        # apertura de cadena
-        delimitador_apertura = self.coincidir("DELIMITER")  # " o '
+        keyword = self.coincidir("KEYWORD")
+        self.coincidir("DELIMITER")
+        delimitador_apertura = self.coincidir("DELIMITER")
         char_cierre = delimitador_apertura[1]
         contenido = []
         while self.obtener_token() and self.obtener_token()[1] != char_cierre:
             contenido.append(self.obtener_token()[1])
             self.pos += 1
-        self.coincidir("DELIMITER")  # cierre de cadena
-        self.coincidir("DELIMITER")  # )
-        self.coincidir("DELIMITER")  # ;
+        self.coincidir("DELIMITER")
+        self.coincidir("DELIMITER")
+        self.coincidir("DELIMITER")
         return NodoPrint(keyword, [" ".join(contenido)])
 
-    #while (condicion) { cuerpo } 
     def instruccionWhile(self):
-        """
-        Reconoce:
-            while (condicion) { cuerpo }
-        """
-        self.coincidir("KEYWORD")   # while
-        self.coincidir("DELIMITER") # (
+        self.coincidir("KEYWORD")
+        self.coincidir("DELIMITER")
         condicion = self.expresion()
-        self.coincidir("DELIMITER") # )
-        self.coincidir("DELIMITER") # {
+        self.coincidir("DELIMITER")
+        self.coincidir("DELIMITER")
         cuerpo = self.cuerpo()
-        self.coincidir("DELIMITER") # }
+        self.coincidir("DELIMITER")
         return NodoWhile(condicion, cuerpo)
 
-    # for (init; cond; inc) { cuerpo } 
     def instruccionFor(self):
-        """
-        Reconoce:
-            for (int i = 0; i < 10; i = i + 1) { cuerpo }
-        """
-        self.coincidir("KEYWORD")   # for
-        self.coincidir("DELIMITER") # (
-
-        # inicio: int i = 0
+        self.coincidir("KEYWORD")
+        self.coincidir("DELIMITER")
         tipo_init = self.coincidir("KEYWORD")
         nombre_init = self.coincidir("IDENTIFIER")
-        self.coincidir("OPERATOR")  # =
+        self.coincidir("OPERATOR")
         expr_init = self.expresion()
-        self.coincidir("DELIMITER") # ;
+        self.coincidir("DELIMITER")
         inicio = NodoAsignacion(tipo_init, nombre_init, expr_init)
-
-        # condición: i < 10
         condicion = self.expresion()
-        self.coincidir("DELIMITER") # ;
-
-        # incremento: i = i + 1  (leemos como texto hasta ')')
+        self.coincidir("DELIMITER")
         partes_inc = []
         while self.obtener_token() and self.obtener_token()[1] != ')':
             partes_inc.append(self.obtener_token()[1])
             self.pos += 1
         incremento = " ".join(partes_inc)
-        self.coincidir("DELIMITER") # )
-
-        self.coincidir("DELIMITER") # {
+        self.coincidir("DELIMITER")
+        self.coincidir("DELIMITER")
         cuerpo = self.cuerpo()
-        self.coincidir("DELIMITER") # }
+        self.coincidir("DELIMITER")
         return NodoFor(inicio, condicion, incremento, cuerpo)
 
-    #  if (cond) { ... } [else { ... }]
     def instruccionIf(self):
-        """
-        Reconoce:
-            if (condicion) { cuerpo }
-            if (condicion) { cuerpo } else { cuerpo_else }
-        """
-        self.coincidir("KEYWORD")   # if
-        self.coincidir("DELIMITER") # (
+        self.coincidir("KEYWORD")
+        self.coincidir("DELIMITER")
         condicion = self.expresion()
-        self.coincidir("DELIMITER") # )
-        self.coincidir("DELIMITER") # {
+        self.coincidir("DELIMITER")
+        self.coincidir("DELIMITER")
         cuerpo_if = self.cuerpo()
-        self.coincidir("DELIMITER") # }
-
+        self.coincidir("DELIMITER")
         cuerpo_else = None
         if self.obtener_token() and self.obtener_token()[1] == 'else':
-            self.coincidir("KEYWORD")   # else
-            self.coincidir("DELIMITER") # {
+            self.coincidir("KEYWORD")
+            self.coincidir("DELIMITER")
             cuerpo_else = self.cuerpo()
-            self.coincidir("DELIMITER") # }
-
+            self.coincidir("DELIMITER")
         return NodoIf(condicion, cuerpo_if, cuerpo_else)
 
 
-# ─── Impresión del AST ───────────────────────────────────────
 def imprimir_ast(nodo):
     if nodo is None:
         return None
@@ -309,7 +259,6 @@ def imprimir_ast(nodo):
         }
     elif isinstance(nodo, NodoInstruccion):
         return {"tipo": nodo.tipo_instruccion[1], "instruccion": nodo.argumentos_instruccion}
-
     elif isinstance(nodo, NodoPrint):
         return {"tipo": nodo.tipo_print[1], "argumentos": nodo.argumentos}
     elif isinstance(nodo, NodoWhile):
@@ -335,5 +284,4 @@ def imprimir_ast(nodo):
         if nodo.cuerpo_else:
             resultado["cuerpo_else"] = [imprimir_ast(c) for c in nodo.cuerpo_else]
         return resultado
-
     return None
