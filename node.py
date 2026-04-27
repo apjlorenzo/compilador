@@ -10,7 +10,8 @@ class NodoPrograma(NodoAST):
     def generarCodigo(self):
         data_text = ["section .data"]
         data_bss = ["section .bss"]
-        codigo = ["section .text", "global _start"]
+        # Declarar printf como símbolo externo (función de la libc)
+        codigo = ["extern printf", "section .text", "global main"]
 
         def recolectar_prints(instrucciones):
             for inst in instrucciones:
@@ -43,13 +44,7 @@ class NodoPrograma(NodoAST):
             elif variable[0] == "float":
                 data_bss.append(f"    {variable[1]}: resq 1")
 
-        codigo.append("_start:")
-        if self.main:
-            codigo.append(f"    call main")
-        codigo.append("    mov eax, 1")
-        codigo.append("    xor ebx, ebx")
-        codigo.append("    int 0x80")
-
+        # Con printf/libc el punto de entrada es main (linked con gcc/ld -lc)
         if self.main:
             codigo.append(self.main.generarCodigo())
 
@@ -76,12 +71,19 @@ class NodoFuncion(NodoAST):
 
     def generarCodigo(self):
         codigo = f"{self.nombre[1]}:\n"
+        # Prólogo estándar cdecl
+        codigo += "    push ebp\n"
+        codigo += "    mov ebp, esp\n"
         if len(self.parametros) > 0:
             for parametro in self.parametros:
                 codigo += "\n    pop eax"
                 codigo += f"\n   mov {parametro.nombre[1]}"
         codigo += "\n".join(c.generarCodigo() for c in self.cuerpo)
-        codigo += "\n    ret  \n"
+        # Epílogo estándar cdecl
+        codigo += "\n    xor eax, eax       ; valor de retorno 0"
+        codigo += "\n    mov esp, ebp"
+        codigo += "\n    pop ebp"
+        codigo += "\n    ret\n"
         return codigo
 
     def traducirPy(self):
@@ -181,7 +183,9 @@ class NodoRetorno(NodoAST):
         self.expresion = expresion
 
     def generarCodigo(self):
-        return self.expresion.generarCodigo()
+        # Evaluar la expresión de retorno y dejar el resultado en eax
+        # El epílogo de NodoFuncion se encarga del ret, aquí solo preparamos eax
+        return self.expresion.generarCodigo() + "  ; valor de retorno en eax"
 
     def traducirPy(self):
         return f"return {self.expresion.traducirPy()}"
@@ -275,22 +279,24 @@ class NodoPrint(NodoAST):
         self.etiqueta = f"msg_{NodoPrint._contador}"
 
     def generarCodigo(self):
-        texto = self.argumentos[0] if self.argumentos else ""
-        longitud = len(texto) + (1 if self.tipo_print[1] == "println" else 0)
+        # Llamada a printf usando convención de llamada cdecl (i386):
+        #   push argumento (puntero al string)
+        #   call printf
+        #   add esp, 4   ; limpiar la pila (1 argumento × 4 bytes)
         codigo = []
-        codigo.append(f"    mov eax, 4")
-        codigo.append(f"    mov ebx, 1")
-        codigo.append(f"    mov ecx, {self.etiqueta}")
-        codigo.append(f"    mov edx, {longitud}")
-        codigo.append(f"    int 0x80")
+        codigo.append(f"    push {self.etiqueta}   ; argumento: puntero al formato/string")
+        codigo.append(f"    call printf            ; llamada a función externa printf")
+        codigo.append(f"    add esp, 4             ; restaurar pila (cdecl: caller limpia)")
         return "\n".join(codigo)
 
     def obtenerDato(self):
+        # printf requiere strings terminados en null (0)
+        # println agrega salto de línea (10 = '\n') antes del terminador null
         texto = self.argumentos[0] if self.argumentos else ""
         if self.tipo_print[1] == "println":
-            return f'    {self.etiqueta} db "{texto}", 10'
+            return f'    {self.etiqueta} db "{texto}", 10, 0'
         else:
-            return f'    {self.etiqueta} db "{texto}"'
+            return f'    {self.etiqueta} db "{texto}", 0'
 
     def traducirPy(self):
         args = ", ".join(f'"{a}"' if isinstance(a, str) else a.traducirPy() for a in self.argumentos)

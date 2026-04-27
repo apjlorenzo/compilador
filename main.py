@@ -7,6 +7,7 @@ import os
 def compilar(archivo_asm):
     nombre = archivo_asm.replace(".asm", "")
     archivo_obj = nombre + ".o"
+    # Paso 1: Ensamblar con NASM en formato ELF32
     resultado_nasm = subprocess.run(
         ["nasm", "-f", "elf32", archivo_asm, "-o", archivo_obj],
         capture_output=True, text=True
@@ -15,12 +16,15 @@ def compilar(archivo_asm):
         print("Error en nasm:")
         print(resultado_nasm.stderr)
         return
+    # Paso 2: Enlazar con gcc para incluir libc (necesario para printf)
+    #         -m32    → produce ejecutable de 32 bits
+    #         -no-pie → deshabilita PIE para compatibilidad con código asm simple
     resultado_ld = subprocess.run(
-        ["ld", "-m", "elf_i386", archivo_obj, "-o", nombre],
+        ["gcc", "-m32", "-no-pie", archivo_obj, "-o", nombre],
         capture_output=True, text=True
     )
     if resultado_ld.returncode != 0:
-        print("Error en ld:")
+        print("Error en gcc (enlazado):")
         print(resultado_ld.stderr)
         return
     print(f"Compilado exitosamente: {nombre}")
@@ -55,7 +59,7 @@ def main():
     with open("salida.asm", "w") as f:
         f.write(asm)
 
-    print("\n=== COMPILANDO CON NASM Y LD ===")
-    compilar("salida.asm")
+    ## print("\n=== COMPILANDO CON NASM Y LD ===")
+    ##compilar("salida.asm")
 
 main()
