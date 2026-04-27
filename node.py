@@ -12,6 +12,8 @@ class NodoPrograma(NodoAST):
         data_bss = ["section .bss"]
         # Declarar printf como símbolo externo (función de la libc)
         codigo = ["extern printf", "section .text", "global main"]
+        # Conjunto de constantes float ya emitidas (para no duplicar)
+        float_consts_vistas = set()
 
         def recolectar_prints(instrucciones):
             for inst in instrucciones:
@@ -26,27 +28,72 @@ class NodoPrograma(NodoAST):
                     if inst.cuerpo_else:
                         recolectar_prints(inst.cuerpo_else)
 
+        def extraer_float_consts(bloque_asm):
+            """
+            Escanea el código ASM generado buscando marcadores
+                ; [FLOAT_CONST] etiqueta dq valor
+            y los mueve a la sección .data, eliminando el marcador del cuerpo.
+            """
+            import re
+            lineas_limpias = []
+            for linea in bloque_asm.split("\n"):
+                m = re.match(r"\s*;\s*\[FLOAT_CONST\]\s+(\S+)\s+dq\s+(\S+)", linea)
+                if m:
+                    etiqueta, valor = m.group(1), m.group(2)
+                    if etiqueta not in float_consts_vistas:
+                        float_consts_vistas.add(etiqueta)
+                        data_text.append(f"    {etiqueta} dq {valor}  ; constante float")
+                else:
+                    lineas_limpias.append(linea)
+            return "\n".join(lineas_limpias)
+
+        def recolectar_variables(instrucciones):
+            """Recorre instrucciones y extrae todas las NodoAsignacion."""
+            for inst in instrucciones:
+                if isinstance(inst, NodoAsignacion):
+                    self.variables.append((inst.tipo[1], inst.nombre[1]))
+                elif isinstance(inst, NodoWhile):
+                    recolectar_variables(inst.cuerpo)
+                elif isinstance(inst, NodoFor):
+                    if isinstance(inst.inicio, NodoAsignacion):
+                        self.variables.append((inst.inicio.tipo[1], inst.inicio.nombre[1]))
+                    recolectar_variables(inst.cuerpo)
+                elif isinstance(inst, NodoIf):
+                    recolectar_variables(inst.cuerpo_if)
+                    if inst.cuerpo_else:
+                        recolectar_variables(inst.cuerpo_else)
+
         for funcion in self.funciones:
-            codigo.append(funcion.generarCodigo())
-            if funcion.cuerpo and hasattr(funcion.cuerpo[0], 'tipo'):
-                self.variables.append((funcion.cuerpo[0].tipo[1], funcion.cuerpo[0].nombre[1]))
-            if len(funcion.parametros) > 0:
-                for parametro in funcion.parametros:
-                    self.variables.append((parametro.tipo[1], parametro.nombre[1]))
+            bloque = funcion.generarCodigo()
+            codigo.append(extraer_float_consts(bloque))
+            # Parámetros de la función van a .bss
+            for parametro in funcion.parametros:
+                self.variables.append((parametro.tipo[1], parametro.nombre[1]))
+            recolectar_variables(funcion.cuerpo)
             recolectar_prints(funcion.cuerpo)
 
         if self.main:
+            recolectar_variables(self.main.cuerpo)
             recolectar_prints(self.main.cuerpo)
 
-        for variable in self.variables:
+        # Eliminar duplicados manteniendo orden
+        vistos = set()
+        variables_unicas = []
+        for v in self.variables:
+            if v[1] not in vistos:
+                vistos.add(v[1])
+                variables_unicas.append(v)
+
+        for variable in variables_unicas:
             if variable[0] == "int":
-                data_bss.append(f"    {variable[1]}: resd 1")
+                data_bss.append(f"    {variable[1]}: resd 1  ; entero (32 bits)")
             elif variable[0] == "float":
-                data_bss.append(f"    {variable[1]}: resq 1")
+                data_bss.append(f"    {variable[1]}: resq 1  ; flotante (64 bits)")
 
         # Con printf/libc el punto de entrada es main (linked con gcc/ld -lc)
         if self.main:
-            codigo.append(self.main.generarCodigo())
+            bloque_main = self.main.generarCodigo()
+            codigo.append(extraer_float_consts(bloque_main))
 
         resultado = "\n".join(data_text) + "\n"
         resultado += "\n".join(data_bss) + "\n"
@@ -129,9 +176,18 @@ class NodoAsignacion(NodoAST):
         self.nombre = nombre
         self.expresion = expresion
 
+    def es_float(self):
+        return self.tipo[1] == "float"
+
     def generarCodigo(self):
         codigo = self.expresion.generarCodigo()
-        codigo += f"\n    mov [{self.nombre[1]}, eax]"
+        if self.es_float():
+            # Resultado float viene en ST(0) de la FPU x87
+            # fstp almacena como double (qword) y hace pop de la pila FPU
+            codigo += f"\n    fstp qword [{self.nombre[1]}]  ; guardar float en variable"
+        else:
+            # Resultado entero viene en eax
+            codigo += f"\n    mov  dword [{self.nombre[1]}], eax  ; guardar int en variable"
         return codigo
 
     def traducirPy(self):
@@ -150,22 +206,51 @@ class NodoOperacion(NodoAST):
         self.derecha = derecha
         self.operador = operador
 
+    def es_float(self):
+        """Determina si alguno de los operandos es flotante (propagación de tipo)."""
+        def operando_es_float(nodo):
+            if isinstance(nodo, NodoNumero):
+                return nodo.es_float()
+            if isinstance(nodo, NodoIdent):
+                return nodo.es_float()
+            if isinstance(nodo, NodoOperacion):
+                return nodo.es_float()
+            return False
+        return operando_es_float(self.izquierda) or operando_es_float(self.derecha)
+
     def generarCodigo(self):
         codigo = []
-        codigo.append(self.izquierda.generarCodigo())
-        codigo.append("    push   eax")
-        codigo.append(self.derecha.generarCodigo())
-        codigo.append("    mov    ebx, eax")
-        codigo.append("    pop    eax")
-        if self.operador[1] == "+":
-            codigo.append("    add    eax, ebx")
-        elif self.operador[1] == "-":
-            codigo.append("    sub    eax, ebx")
-        elif self.operador[1] == "*":
-            codigo.append("    imul   eax, ebx")
-        elif self.operador[1] == "/":
-            codigo.append("    xor    edx, edx")
-            codigo.append("    idiv   ebx")
+        if self.es_float():
+            # === Aritmética de coma flotante con FPU x87 ===
+            # La FPU usa una pila de registros ST(0)..ST(7)
+            # Convención: cada operando deja su resultado en ST(0)
+            codigo.append(self.izquierda.generarCodigo())   # ST(0) = izq
+            codigo.append(self.derecha.generarCodigo())     # ST(0) = der, ST(1) = izq
+            if self.operador[1] == "+":
+                codigo.append("    faddp               ; ST(1) = ST(1) + ST(0), pop ST(0)")
+            elif self.operador[1] == "-":
+                codigo.append("    fsubrp              ; ST(1) = ST(1) - ST(0), pop ST(0)")
+            elif self.operador[1] == "*":
+                codigo.append("    fmulp               ; ST(1) = ST(1) * ST(0), pop ST(0)")
+            elif self.operador[1] == "/":
+                codigo.append("    fdivrp              ; ST(1) = ST(1) / ST(0), pop ST(0)")
+            # Al terminar, el resultado queda en ST(0)
+        else:
+            # === Aritmética entera con registros de propósito general ===
+            codigo.append(self.izquierda.generarCodigo())
+            codigo.append("    push   eax")
+            codigo.append(self.derecha.generarCodigo())
+            codigo.append("    mov    ebx, eax")
+            codigo.append("    pop    eax")
+            if self.operador[1] == "+":
+                codigo.append("    add    eax, ebx")
+            elif self.operador[1] == "-":
+                codigo.append("    sub    eax, ebx")
+            elif self.operador[1] == "*":
+                codigo.append("    imul   eax, ebx")
+            elif self.operador[1] == "/":
+                codigo.append("    xor    edx, edx")
+                codigo.append("    idiv   ebx")
         return "\n".join(codigo)
 
     def traducirPy(self):
@@ -198,10 +283,18 @@ class NodoRetorno(NodoAST):
 
 
 class NodoIdent(NodoAST):
-    def __init__(self, nombre):
+    def __init__(self, nombre, tipo=None):
         self.nombre = nombre
+        # tipo es el string "int" o "float"; el Parser lo inyecta cuando lo conoce
+        self._tipo = tipo
+
+    def es_float(self):
+        return self._tipo == "float"
 
     def generarCodigo(self):
+        if self.es_float():
+            # Variable float vive en memoria como qword (double de 64 bits)
+            return f"\n    fld  qword [{self.nombre[1]}]  ; cargar variable float {self.nombre[1]} en ST(0)"
         return f"\n    mov eax, [{self.nombre[1]}]"
 
     def traducirPy(self):
@@ -216,10 +309,31 @@ class NodoIdent(NodoAST):
 
 class NodoNumero(NodoAST):
     def __init__(self, valor):
+        # valor es un tuple (tipo_token, valor_str)
+        # tipo_token puede ser "FLOAT" o "INTEGER" (nuevo léxico)
+        # o "NUMBER" (compatibilidad con léxico antiguo)
         self.valor = valor
 
+    def es_float(self):
+        tipo = self.valor[0]
+        return tipo == "FLOAT" or (tipo == "NUMBER" and "." in self.valor[1])
+
     def generarCodigo(self):
-        return f"\n    mov eax, {self.valor[1]}"
+        if self.es_float():
+            # Para cargar un literal float en la FPU necesitamos una constante
+            # en memoria. Usamos una etiqueta temporal en .data generada aquí.
+            # Convenio: la etiqueta se llama __flt_<valor_sanitizado>
+            safe = self.valor[1].replace(".", "_")
+            etiqueta = f"__flt_{safe}"
+            # Emitimos una directiva especial que NodoPrograma recolectará
+            # para poner en .data. Usamos un comentario marcador.
+            lineas = [
+                f"    ; [FLOAT_CONST] {etiqueta} dq {self.valor[1]}",
+                f"    fld  qword [{etiqueta}]  ; cargar {self.valor[1]} en ST(0) (FPU)",
+            ]
+            return "\n".join(lineas)
+        else:
+            return f"\n    mov eax, {self.valor[1]}"
 
     def traducirPy(self):
         return self.valor[1]

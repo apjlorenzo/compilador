@@ -7,7 +7,7 @@ import os
 def compilar(archivo_asm):
     nombre = archivo_asm.replace(".asm", "")
     archivo_obj = nombre + ".o"
-    # Paso 1: Ensamblar con NASM en formato ELF32
+    #Ensamblar con NASM en formato ELF32
     resultado_nasm = subprocess.run(
         ["nasm", "-f", "elf32", archivo_asm, "-o", archivo_obj],
         capture_output=True, text=True
@@ -16,7 +16,7 @@ def compilar(archivo_asm):
         print("Error en nasm:")
         print(resultado_nasm.stderr)
         return
-    # Paso 2: Enlazar con gcc para incluir libc (necesario para printf)
+    #Enlazar con gcc para incluir libc (necesario para printf)
     #         -m32    → produce ejecutable de 32 bits
     #         -no-pie → deshabilita PIE para compatibilidad con código asm simple
     resultado_ld = subprocess.run(
@@ -32,11 +32,18 @@ def compilar(archivo_asm):
 def main():
     codigo = """
     int main() {
-        print("Hola mundo");
-        println("Bienvenido al compilador");
-        println("Fin del programa");
+        int a = 10;
+        int b = 3;
+        int c = a + b;      // aritmética entera: add eax, ebx
+        float x = 3.14;
+        float y = 2.5;
+        float z = x + y;   // FPU: faddp
+        float w = x * y;   // FPU: fmulp
+        float d = x - y;   // FPU: fsubrp
+        float q = x / y;   // FPU: fdivrp
+        println("Operaciones con floats listas");
         return 0;
-    }
+    }    
     """
 
     tokens = identificar_tokens(codigo)

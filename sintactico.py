@@ -7,6 +7,9 @@ class Parser:
     def __init__(self, tokens):
         self.tokens = tokens
         self.pos = 0
+        # Tabla de tipos: guarda el tipo declarado de cada variable
+        # { nombre_variable: "int" | "float" }
+        self.tabla_tipos = {}
 
     def obtener_token(self):
         return self.tokens[self.pos] if self.pos < len(self.tokens) else None
@@ -20,6 +23,16 @@ class Parser:
             raise SyntaxError(
                 f"Error sintáctico: Se esperaba {tipo_esperado} pero se encontró: {token_actual}"
             )
+
+    def coincidir_numero(self):
+        """Acepta tanto INTEGER como FLOAT (y NUMBER por compatibilidad)."""
+        token_actual = self.obtener_token()
+        if token_actual and token_actual[0] in ("INTEGER", "FLOAT", "NUMBER"):
+            self.pos += 1
+            return token_actual
+        raise SyntaxError(
+            f"Error sintáctico: Se esperaba número pero se encontró: {token_actual}"
+        )
 
     def parsear(self):
         return self.construccion_programa()
@@ -53,11 +66,13 @@ class Parser:
         lista_parametros = []
         tipo = self.coincidir("KEYWORD")
         nombre = self.coincidir('IDENTIFIER')
+        self.tabla_tipos[nombre[1]] = tipo[1]
         lista_parametros.append(NodoParametro(tipo, nombre))
         while self.obtener_token() and self.obtener_token()[1] == ',':
             self.coincidir("DELIMITER")
             tipo = self.coincidir("KEYWORD")
             nombre = self.coincidir('IDENTIFIER')
+            self.tabla_tipos[nombre[1]] = tipo[1]
             lista_parametros.append(NodoParametro(tipo, nombre))
         return lista_parametros
 
@@ -84,6 +99,8 @@ class Parser:
     def asignacion(self):
         tipo = self.coincidir('KEYWORD')
         nombre = self.coincidir('IDENTIFIER')
+        # Registrar el tipo de la variable para poder inferirlo en NodoIdent
+        self.tabla_tipos[nombre[1]] = tipo[1]
         operador = self.coincidir('OPERATOR')
         expresion = self.expresion()
         self.coincidir('DELIMITER')
@@ -105,8 +122,9 @@ class Parser:
 
     def termino(self):
         token = self.obtener_token()
-        if token and token[0] == "NUMBER":
-            return NodoNumero(self.coincidir("NUMBER"))
+        if token and token[0] in ("FLOAT", "INTEGER", "NUMBER"):
+            # coincidir_numero acepta los tres tipos de token numérico
+            return NodoNumero(self.coincidir_numero())
         elif token and token[0] == "IDENTIFIER":
             identificador = self.coincidir("IDENTIFIER")
             if self.obtener_token() and self.obtener_token()[1] == "(":
@@ -117,7 +135,9 @@ class Parser:
                 self.coincidir("DELIMITER")
                 return NodoLlamadaFuncion(identificador[1], argumentos)
             else:
-                return NodoIdent(identificador)
+                # Inyectar el tipo conocido para que NodoIdent genere FPU o entero
+                tipo_conocido = self.tabla_tipos.get(identificador[1], None)
+                return NodoIdent(identificador, tipo=tipo_conocido)
         else:
             raise SyntaxError(f"Expresión no válida: {token}")
 
@@ -126,10 +146,12 @@ class Parser:
         sigue = True
         while sigue:
             token = self.obtener_token()
-            if token[0] == "NUMBER":
-                argumento = NodoNumero(self.coincidir("NUMBER"))
+            if token[0] in ("FLOAT", "INTEGER", "NUMBER"):
+                argumento = NodoNumero(self.coincidir_numero())
             elif token[0] == "IDENTIFIER":
-                argumento = NodoIdent(self.coincidir("IDENTIFIER"))
+                ident = self.coincidir("IDENTIFIER")
+                tipo_conocido = self.tabla_tipos.get(ident[1], None)
+                argumento = NodoIdent(ident, tipo=tipo_conocido)
             else:
                 raise SyntaxError(f"Se esperaba IDENTIFICADOR|NUMERO pero se encontró: {token}")
             argumentos.append(argumento)
