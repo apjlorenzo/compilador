@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Compilador visual</title>
+    <link rel="stylesheet" href="styles.css">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap"
+        rel="stylesheet">
+</head>
+
+<body>
+    <div class="app-container">
+        <!-- Panel Izquierdo: Herramientas -->
+        <aside class="sidebar">
+            <div class="brand">
+                <div class="logo"></div>
+                <h1>Compilador</h1>
+            </div>
+
+            <div class="toolbar-title">Diagramas de Flujo</div>
+            <div class="toolbar" id="toolbox">
+                <div class="tool-btn" draggable="true" data-type="start">
+                    <span class="icon">🟢</span> Inicio/Fin
+                </div>
+                <div class="tool-btn" draggable="true" data-type="assign">
+                    <span class="icon">🟦</span> Asignación
+                </div>
+                <div class="tool-btn" draggable="true" data-type="if">
+                    <span class="icon">🔶</span> Decisión (Si)
+                </div>
+                <div class="tool-btn" draggable="true" data-type="while">
+                    <span class="icon">🔄</span> Bucle (Mientras)
+                </div>
+                <div class="tool-btn" draggable="true" data-type="print">
+                    <span class="icon">📤</span> Salida (Imprimir)
+                </div>
+                <div class="tool-btn" draggable="true" data-type="input">
+                    <span class="icon">📥</span> Entrada (Leer)
+                </div>
+            </div>
+
+            <button id="btn-compile" class="btn-compile">🚀 Compilar y Ejecutar</button>
+        </aside>
+
+        <!-- Panel Central: Código/Visual -->
+        <main class="editor-panel">
+            <div class="panel-header">
+                <div class="view-tabs">
+                    <button class="view-btn active" data-view="visual">Diagrama de Flujo</button>
+                    <button class="view-btn" data-view="code">Código Fuente</button>
+                </div>
+                <div class="status-indicator" id="compile-status">Listo</div>
+            </div>
+
+            <div id="visual-view" class="view-pane active">
+                <div class="flowchart-canvas" id="canvas">
+                    <div class="empty-msg">Arrastra bloques aquí para armar tu programa...</div>
+                </div>
+            </div>
+
+            <div id="code-view" class="view-pane">
+                <textarea id="code-editor" class="code-area" spellcheck="false">int main() {
+    
+    return 0;
+}</textarea>
+            </div>
+        </main>
+
+        <!-- Panel Derecho: Resultados -->
+        <aside class="results-panel">
+            <div class="tabs">
+                <button class="tab-btn active" data-target="tab-asm">Assembler</button>
+                <button class="tab-btn" data-target="tab-ruby">Ruby</button>
+                <button class="tab-btn" data-target="tab-py">Python</button>
+                <button class="tab-btn" data-target="tab-rust">Rust</button>
+                <button class="tab-btn" data-target="tab-ast">AST</button>
+                <button class="tab-btn" data-target="tab-sym">Símbolos</button>
+                <button class="tab-btn" data-target="tab-echo">ECHO (Log)</button>
+            </div>
+
+            <div class="tab-content">
+                <div id="tab-asm" class="tab-pane active">
+                    <pre><code id="out-asm">Esperando compilación...</code></pre>
+                </div>
+                <div id="tab-ruby" class="tab-pane">
+                    <pre><code id="out-ruby">Esperando compilación...</code></pre>
+                </div>
+                <div id="tab-py" class="tab-pane">
+                    <pre><code id="out-py">Esperando compilación...</code></pre>
+                </div>
+                <div id="tab-rust" class="tab-pane">
+                    <pre><code id="out-rust">Esperando compilación...</code></pre>
+                </div>
+                <div id="tab-ast" class="tab-pane">
+                    <pre><code id="out-ast">Esperando compilación...</code></pre>
+                </div>
+                <div id="tab-sym" class="tab-pane">
+                    <pre><code id="out-sym">Esperando compilación...</code></pre>
+                </div>
+                <div id="tab-echo" class="tab-pane">
+                    <pre><code id="out-echo" class="echo-log">Compilando...\nnasm...\nld...\nejecutado con...</code></pre>
+                </div>
+            </div>
+        </aside>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+
+</html>

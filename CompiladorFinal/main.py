@@ -1,0 +1,391 @@
+"""
+main.py — Orquestador del compilador.
+
+Expone la función compilar_codigo(codigo) que devuelve un diccionario
+con todas las fases, listo para ser consumido por la interfaz gráfica:
+
+    {
+        "tokens"      : [(tipo, valor), ...],
+        "ast_json"    : {...},           # AST serializado
+        "tabla"       : {...},           # tabla de símbolos serializada
+        "errores"     : [...],           # errores semánticos (str)
+        "avisos"      : [...],           # advertencias semánticas (str)
+        "ruby"        : "...",           # traducción a Ruby
+        "python"      : "...",           # traducción a Python
+        "rust"        : "...",           # traducción a Rust
+        "asm"         : "...",           # código ensamblador NASM
+        "log"         : "...",           # log completo de la compilación
+        "ok"          : True | False,    # False si hay errores semánticos
+    }
+
+También se puede ejecutar directamente (python main.py) para ver
+la salida completa en consola con el código de ejemplo.
+"""
+
+import json
+import io
+import subprocess
+import os
+
+from lexico    import identificar_tokens
+from sintactico import Parser, imprimir_ast
+from semantico  import AnalizadorSemantico, imprimir_resultado_semantico
+from node import (
+    NodoAsignacion, NodoPrint, NodoImprimir, NodoWhile, NodoFor, NodoIf,
+    NodoLlamadaFuncion, NodoRetorno,
+)
+
+
+# ===========================================================================
+# TABLA DE SÍMBOLOS AUXILIAR  (para la GUI — complementa la del semántico)
+# ===========================================================================
+
+def construir_tabla_simbolos(ast):
+    """
+    Recorre el AST y construye la tabla de símbolos del programa.
+    Retorna un diccionario con tres secciones:
+      - funciones : funciones declaradas (nombre, tipo retorno, parámetros)
+      - variables : variables locales y parámetros (nombre, tipo, ámbito, clase)
+      - strings   : literales de texto usados en print/println/printf/puts
+    """
+    tabla = {"funciones": [], "variables": [], "strings": []}
+
+    def recorrer(instrucciones, ambito):
+        for inst in instrucciones:
+            if isinstance(inst, NodoAsignacion):
+                tabla["variables"].append({
+                    "nombre": inst.nombre[1],
+                    "tipo"  : inst.tipo[1],
+                    "ambito": ambito,
+                    "clase" : "variable local",
+                })
+            elif isinstance(inst, NodoPrint):
+                texto = inst.argumentos[0] if inst.argumentos else ""
+                tabla["strings"].append({
+                    "etiqueta": inst.etiqueta,
+                    "valor"   : texto,
+                    "tipo"    : inst.tipo_print[1],
+                    "ambito"  : ambito,
+                })
+            elif isinstance(inst, NodoImprimir):
+                from node import NodoString
+                for arg in inst.argumentos:
+                    if isinstance(arg, NodoString):
+                        tabla["strings"].append({
+                            "etiqueta": inst.etiqueta,
+                            "valor"   : arg.valor[1].strip('"'),
+                            "tipo"    : inst.tipo[1],
+                            "ambito"  : ambito,
+                        })
+            elif isinstance(inst, NodoWhile):
+                recorrer(inst.cuerpo, ambito)
+            elif isinstance(inst, NodoFor):
+                if isinstance(inst.inicio, NodoAsignacion):
+                    tabla["variables"].append({
+                        "nombre": inst.inicio.nombre[1],
+                        "tipo"  : inst.inicio.tipo[1],
+                        "ambito": ambito,
+                        "clase" : "variable de control (for)",
+                    })
+                recorrer(inst.cuerpo, ambito)
+            elif isinstance(inst, NodoIf):
+                recorrer(inst.cuerpo_if, ambito)
+                if inst.cuerpo_else:
+                    recorrer(inst.cuerpo_else, ambito)
+
+    if ast.main:
+        tabla["funciones"].append({
+            "nombre"      : "main",
+            "tipo_retorno": "int",
+            "parametros"  : [],
+            "clase"       : "función principal",
+        })
+        recorrer(ast.main.cuerpo, "main")
+
+    for funcion in ast.funciones:
+        params = [{"nombre": p.nombre[1], "tipo": p.tipo[1]} for p in funcion.parametros]
+        tabla["funciones"].append({
+            "nombre"      : funcion.nombre[1],
+            "tipo_retorno": funcion.tipo[1],
+            "parametros"  : params,
+            "clase"       : "función",
+        })
+        for p in funcion.parametros:
+            tabla["variables"].append({
+                "nombre": p.nombre[1],
+                "tipo"  : p.tipo[1],
+                "ambito": funcion.nombre[1],
+                "clase" : "parámetro",
+            })
+        recorrer(funcion.cuerpo, funcion.nombre[1])
+
+    return tabla
+
+
+def imprimir_tabla_simbolos(tabla):
+    ancho = 70
+    print("=" * ancho)
+    print(" TABLA DE SÍMBOLOS ".center(ancho))
+    print("=" * ancho)
+
+    print("\n[ FUNCIONES ]")
+    print(f"  {'Nombre':<20} {'Tipo retorno':<14} {'Clase':<22} {'Parámetros'}")
+    print("  " + "-" * (ancho - 2))
+    if tabla["funciones"]:
+        for f in tabla["funciones"]:
+            params_str = ", ".join(f"{p['tipo']} {p['nombre']}" for p in f["parametros"]) or "(ninguno)"
+            print(f"  {f['nombre']:<20} {f['tipo_retorno']:<14} {f['clase']:<22} {params_str}")
+    else:
+        print("  (sin funciones declaradas)")
+
+    print("\n[ VARIABLES ]")
+    print(f"  {'Nombre':<20} {'Tipo':<10} {'Ámbito':<16} {'Clase'}")
+    print("  " + "-" * (ancho - 2))
+    if tabla["variables"]:
+        for v in tabla["variables"]:
+            print(f"  {v['nombre']:<20} {v['tipo']:<10} {v['ambito']:<16} {v['clase']}")
+    else:
+        print("  (sin variables declaradas)")
+
+    print("\n[ LITERALES DE CADENA ]")
+    print(f"  {'Etiqueta':<12} {'Tipo':<10} {'Ámbito':<16} {'Valor'}")
+    print("  " + "-" * (ancho - 2))
+    if tabla["strings"]:
+        for s in tabla["strings"]:
+            print(f"  {s['etiqueta']:<12} {s['tipo']:<10} {s['ambito']:<16} \"{s['valor']}\"")
+    else:
+        print("  (sin literales de cadena)")
+
+    print("\n" + "=" * ancho)
+
+
+# ===========================================================================
+# COMPILACIÓN  (nasm + gcc con libc para printf)
+# ===========================================================================
+
+def compilar_asm(archivo_asm):
+    """
+    Ensambla con NASM y enlaza con GCC (libc, 32 bits).
+    Retorna (exito: bool, log: str).
+    """
+    log   = []
+    nombre = archivo_asm.replace(".asm", "")
+    obj    = nombre + ".o"
+
+    try:
+        cmd_nasm = f"nasm -f elf32 {archivo_asm} -o {obj}"
+        res_nasm = subprocess.run(cmd_nasm, capture_output=True, text=True, shell=True)
+        log.append(f"[NASM] returncode={res_nasm.returncode}")
+        if res_nasm.stdout: log.append(res_nasm.stdout)
+        if res_nasm.stderr: log.append(res_nasm.stderr)
+        if res_nasm.returncode != 0:
+            return False, "\n".join(log)
+
+        cmd_gcc = f"gcc -m32 -no-pie {obj} -o {nombre}"
+        res_gcc = subprocess.run(cmd_gcc, capture_output=True, text=True, shell=True)
+        log.append(f"[GCC]  returncode={res_gcc.returncode}")
+        if res_gcc.stdout: log.append(res_gcc.stdout)
+        if res_gcc.stderr: log.append(res_gcc.stderr)
+        if res_gcc.returncode != 0:
+            return False, "\n".join(log)
+            
+    except Exception as e:
+        log.append(f"[ERROR COMPILACIÓN C/ASM] {e}")
+        return False, "\n".join(log)
+
+    log.append(f"[OK]   Ejecutable generado: {nombre}")
+    return True, "\n".join(log)
+
+
+# ===========================================================================
+# API PRINCIPAL  (para la interfaz gráfica)
+# ===========================================================================
+
+def compilar_codigo(codigo: str, archivo_asm: str = "salida.asm") -> dict:
+    """
+    Ejecuta todas las fases del compilador sobre *codigo* y devuelve
+    un diccionario con los resultados de cada fase.
+
+    Parámetros:
+        codigo     -- código fuente en el lenguaje del compilador
+        archivo_asm -- ruta donde guardar el .asm generado
+
+    Retorna un dict con las claves:
+        tokens, ast_json, tabla, errores, avisos,
+        ruby, python, rust, asm, log, ok
+    """
+    log_lines = []
+    resultado = {
+        "tokens"  : [],
+        "ast_json": None,
+        "tabla"   : None,
+        "errores" : [],
+        "avisos"  : [],
+        "ruby"    : "",
+        "python"  : "",
+        "rust"    : "",
+        "asm"     : "",
+        "log"     : "",
+        "ok"      : False,
+    }
+
+    # ------------------------------------------------------------------
+    # FASE 1: Análisis léxico
+    # ------------------------------------------------------------------
+    try:
+        tokens = identificar_tokens(codigo)
+        resultado["tokens"] = tokens
+        log_lines.append(f"[LÉXICO] {len(tokens)} tokens encontrados.")
+    except Exception as e:
+        log_lines.append(f"[LÉXICO ERROR] {e}")
+        resultado["log"] = "\n".join(log_lines)
+        return resultado
+
+    # ------------------------------------------------------------------
+    # FASE 2: Análisis sintáctico
+    # ------------------------------------------------------------------
+    try:
+        parser  = Parser(tokens)
+        ast     = parser.parsear()
+        ast_dict = imprimir_ast(ast)
+        resultado["ast_json"] = ast_dict
+        log_lines.append("[SINTÁCTICO] AST construido correctamente.")
+    except SyntaxError as e:
+        log_lines.append(f"[SINTÁCTICO ERROR] {e}")
+        resultado["log"] = "\n".join(log_lines)
+        return resultado
+
+    # ------------------------------------------------------------------
+    # FASE 3: Análisis semántico
+    # ------------------------------------------------------------------
+    try:
+        semantico = AnalizadorSemantico()
+        tabla_sem, errores, avisos = semantico.analizar(ast)
+
+        resultado["tabla"]   = tabla_sem.como_dict()
+        resultado["errores"] = [str(e) for e in errores]
+        resultado["avisos"]  = [str(a) for a in avisos]
+
+        if errores:
+            log_lines.append(f"[SEMÁNTICO] {len(errores)} error(es) encontrado(s).")
+            for e in errores:
+                log_lines.append(str(e))
+        else:
+            log_lines.append("[SEMÁNTICO] Sin errores.")
+
+        if avisos:
+            log_lines.append(f"[SEMÁNTICO] {len(avisos)} advertencia(s).")
+            for a in avisos:
+                log_lines.append(str(a))
+
+    except Exception as e:
+        log_lines.append(f"[SEMÁNTICO ERROR] {e}")
+        resultado["log"] = "\n".join(log_lines)
+        return resultado
+
+    # ------------------------------------------------------------------
+    # FASE 4: Traducciones
+    # ------------------------------------------------------------------
+    try:
+        resultado["ruby"]   = ast.traducirRuby()   if hasattr(ast, "traducirRuby")   else ""
+        resultado["python"] = ast.traducirPy()     if hasattr(ast, "traducirPy")     else ""
+        resultado["rust"]   = ast.traducirRust()   if hasattr(ast, "traducirRust")   else ""
+        log_lines.append("[TRADUCCIONES] Ruby, Python, Rust generados.")
+    except Exception as e:
+        log_lines.append(f"[TRADUCCIONES ERROR] {e}")
+
+    # ------------------------------------------------------------------
+    # FASE 5: Generación de código ensamblador
+    # ------------------------------------------------------------------
+    try:
+        asm = ast.generarCodigo()
+        resultado["asm"] = asm
+        with open(archivo_asm, "w", encoding="utf-8") as f:
+            f.write(asm)
+        log_lines.append(f"[ASM] Código ensamblador guardado en '{archivo_asm}'.")
+    except Exception as e:
+        log_lines.append(f"[ASM ERROR] {e}")
+
+    resultado["ok"]  = len(errores) == 0
+    resultado["log"] = "\n".join(log_lines)
+    return resultado
+
+
+# ===========================================================================
+# EJECUCIÓN DIRECTA (demo en consola)
+# ===========================================================================
+
+def main():
+    codigo = """
+    int suma(int a, int b) {
+        int resultado = a + b;
+        return resultado;
+    }
+
+    int main() {
+        int x = 10;
+        int y = 3;
+        float pi = 3.14;
+        float radio = 2.5;
+        float area = pi * radio;
+        int total = suma(x, y);
+        println("Resultado de la suma:");
+        int i = 0;
+        while (i < 3) {
+            int paso = i + 1;
+            i = paso;
+        }
+        if (total > 10) {
+            int grande = 1;
+        } else {
+            int chico = 0;
+        }
+        return 0;
+    }
+    """
+
+    res = compilar_codigo(codigo)
+
+    print("=== TOKENS ===")
+    for tok in res["tokens"]:
+        print(f"  {tok}")
+
+    print("\n=== AST ===")
+    print(json.dumps(res["ast_json"], indent=2, ensure_ascii=False))
+
+    print("\n=== TABLA DE SÍMBOLOS (semántico) ===")
+    t = res["tabla"]
+    if t:
+        print("Funciones:", t["funciones"])
+        print("Variables:", t["variables"])
+
+    print("\n=== ERRORES SEMÁNTICOS ===")
+    for e in res["errores"]:
+        print(e)
+    if not res["errores"]:
+        print("  Sin errores.")
+
+    print("\n=== ADVERTENCIAS ===")
+    for a in res["avisos"]:
+        print(a)
+    if not res["avisos"]:
+        print("  Sin advertencias.")
+
+    print("\n=== TRADUCCIÓN A RUBY ===")
+    print(res["ruby"])
+
+    print("\n=== TRADUCCIÓN A PYTHON ===")
+    print(res["python"])
+
+    print("\n=== TRADUCCIÓN A RUST ===")
+    print(res["rust"])
+
+    print("\n=== CÓDIGO ENSAMBLADOR ===")
+    print(res["asm"])
+
+    print("\n=== LOG DE COMPILACIÓN ===")
+    print(res["log"])
+
+
+if __name__ == "__main__":
+    main()

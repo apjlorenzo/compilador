@@ -1,0 +1,438 @@
+:root {
+    --bg-base: #0f172a;
+    --bg-surface: rgba(30, 41, 59, 0.7);
+    --bg-surface-hover: rgba(51, 65, 85, 0.8);
+    --text-main: #f8fafc;
+    --text-muted: #94a3b8;
+    --accent: #3b82f6;
+    --accent-glow: rgba(59, 130, 246, 0.5);
+    --success: #10b981;
+    --error: #ef4444;
+    --border: rgba(255, 255, 255, 0.1);
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: 'Inter', sans-serif;
+    background-color: var(--bg-base);
+    color: var(--text-main);
+    height: 100vh;
+    overflow: hidden;
+    background-image: 
+        radial-gradient(circle at 15% 50%, rgba(59, 130, 246, 0.15), transparent 25%),
+        radial-gradient(circle at 85% 30%, rgba(139, 92, 246, 0.15), transparent 25%);
+}
+
+.app-container {
+    display: flex;
+    height: 100vh;
+    padding: 1rem;
+    gap: 1rem;
+}
+
+/* Glassmorphism utility */
+.glass {
+    background: var(--bg-surface);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
+}
+
+/* Sidebar */
+.sidebar {
+    width: 280px;
+    display: flex;
+    flex-direction: column;
+    padding: 1.5rem;
+}
+
+.sidebar h1 {
+    font-size: 1.25rem;
+    font-weight: 700;
+    background: linear-gradient(to right, #60a5fa, #a78bfa);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 2rem;
+}
+
+.toolbar-title {
+    font-size: 0.875rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 1rem;
+}
+
+.toolbar {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    flex: 1;
+}
+
+.tool-btn {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border);
+    color: var(--text-main);
+    padding: 0.75rem 1rem;
+    border-radius: 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    font-size: 0.95rem;
+    transition: all 0.2s ease;
+    text-align: left;
+}
+
+.tool-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+}
+
+.icon {
+    font-size: 1.2rem;
+}
+
+.btn-compile {
+    background: var(--accent);
+    color: white;
+    border: none;
+    padding: 1rem;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    margin-top: auto;
+    box-shadow: 0 0 20px var(--accent-glow);
+}
+
+.btn-compile:hover {
+    background: #2563eb;
+    transform: scale(1.02);
+    box-shadow: 0 0 30px var(--accent-glow);
+}
+
+/* Editor Panel */
+.editor-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 1.5rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.panel-header h2 {
+    font-size: 1.1rem;
+    font-weight: 500;
+}
+
+.status-indicator {
+    font-size: 0.85rem;
+    padding: 0.25rem 0.75rem;
+    border-radius: 999px;
+    background: rgba(148, 163, 184, 0.2);
+    color: var(--text-muted);
+}
+
+.status-indicator.success { background: rgba(16, 185, 129, 0.2); color: var(--success); }
+.status-indicator.error { background: rgba(239, 68, 68, 0.2); color: var(--error); }
+
+/* Editor View Tabs */
+.view-tabs {
+    display: flex;
+    gap: 1rem;
+}
+
+.view-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 0.95rem;
+    cursor: pointer;
+    padding-bottom: 0.5rem;
+    border-bottom: 2px solid transparent;
+}
+
+.view-btn.active {
+    color: var(--text-main);
+    border-bottom-color: var(--accent);
+}
+
+.view-pane {
+    display: none;
+    flex: 1;
+    overflow: hidden;
+    position: relative;
+}
+
+.view-pane.active {
+    display: flex;
+    flex-direction: column;
+}
+
+.code-area {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: #e2e8f0;
+    font-family: 'Fira Code', monospace;
+    font-size: 15px;
+    line-height: 1.6;
+    padding: 1.5rem;
+    resize: none;
+    outline: none;
+}
+
+/* Flowchart Canvas */
+.flowchart-canvas {
+    flex: 1;
+    background: rgba(0, 0, 0, 0.2);
+    overflow-y: auto;
+    padding: 2rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2rem;
+}
+
+.empty-msg {
+    color: var(--text-muted);
+    font-style: italic;
+    margin-top: 3rem;
+}
+
+/* Flowchart Blocks */
+.flow-block {
+    position: relative;
+    padding: 1rem 1.5rem;
+    min-width: 250px;
+    color: white;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    cursor: grab;
+    transition: transform 0.2s;
+    background: transparent;
+    border: none;
+    align-items: center;
+}
+
+.flow-block:not(:last-child)::after {
+    content: "↓";
+    position: absolute;
+    bottom: -2.5rem;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 1.8rem;
+    color: var(--accent);
+    font-weight: bold;
+    z-index: 10;
+}
+
+.shape-bg {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    z-index: 0;
+    background: rgba(30, 41, 59, 0.8);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+    transition: all 0.3s ease;
+}
+
+.block-content {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+/* Shapes via clip-path & border-radius on .shape-bg */
+.flow-block.start .shape-bg {
+    border-radius: 50px; /* Pill shape */
+    background: rgba(16, 185, 129, 0.25);
+    border: 2px solid #10b981;
+}
+.flow-block.start { padding: 1.5rem 2rem; }
+
+.flow-block.assign .shape-bg {
+    border-radius: 8px; /* Rectangle */
+    background: rgba(59, 130, 246, 0.25);
+    border: 2px solid #3b82f6;
+}
+
+.flow-block.if .shape-bg {
+    /* Rombo (Diamond) */
+    clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+    background: rgba(245, 158, 11, 0.4);
+}
+.flow-block.if {
+    padding: 3.5rem 2rem;
+    min-width: 320px;
+}
+
+.flow-block.while .shape-bg {
+    /* Hexagon */
+    clip-path: polygon(15% 0%, 85% 0%, 100% 50%, 85% 100%, 15% 100%, 0% 50%);
+    background: rgba(139, 92, 246, 0.4);
+}
+.flow-block.while {
+    padding: 2.5rem 3rem;
+    min-width: 340px;
+}
+
+.flow-block.print .shape-bg,
+.flow-block.input .shape-bg {
+    /* Paralelogramo */
+    clip-path: polygon(10% 0%, 100% 0%, 90% 100%, 0% 100%);
+    background: rgba(236, 72, 153, 0.4); 
+}
+.flow-block.input .shape-bg {
+    background: rgba(14, 165, 233, 0.4);
+}
+.flow-block.print,
+.flow-block.input {
+    padding: 1.5rem 3.5rem;
+    min-width: 300px;
+}
+
+.block-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-weight: bold;
+    font-size: 0.9rem;
+    text-transform: uppercase;
+}
+
+.block-header .delete-btn {
+    cursor: pointer;
+    color: var(--error);
+    background: transparent;
+    border: none;
+    font-size: 1.1rem;
+}
+
+.block-body {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.block-input {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--border);
+    color: white;
+    padding: 0.4rem;
+    border-radius: 4px;
+    font-family: 'Fira Code', monospace;
+    flex: 1;
+}
+
+.block-input.short {
+    flex: 0.3;
+}
+
+/* Drop Indicator */
+.drop-indicator {
+    height: 4px;
+    width: 200px;
+    background: var(--success);
+    border-radius: 4px;
+    margin: -1rem 0;
+    transition: all 0.2s;
+}
+.results-panel {
+    width: 400px;
+    display: flex;
+    flex-direction: column;
+}
+
+.tabs {
+    display: flex;
+    overflow-x: auto;
+    border-bottom: 1px solid var(--border);
+}
+
+.tab-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    padding: 1rem 1.25rem;
+    cursor: pointer;
+    font-weight: 500;
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+.tab-btn:hover {
+    color: var(--text-main);
+    background: rgba(255,255,255,0.05);
+}
+
+.tab-btn.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+}
+
+.tab-content {
+    flex: 1;
+    overflow: hidden;
+    position: relative;
+}
+
+.tab-pane {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    padding: 1rem;
+    overflow-y: auto;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+}
+
+.tab-pane.active {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+pre {
+    font-family: 'Fira Code', monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    color: #cbd5e1;
+    white-space: pre-wrap;
+}
+
+.echo-log {
+    color: #a78bfa;
+}
+
+/* Add glass class to panels */
+.sidebar, .editor-panel, .results-panel {
+    border-radius: 16px;
+    background: var(--bg-surface);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--border);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
