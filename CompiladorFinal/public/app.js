@@ -18,8 +18,101 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (hasBlocks) {
                     generateCodeFromCanvas();
                 }
+            } else if (btn.dataset.view === 'visual') {
+                generateCanvasFromCode();
             }
         });
+    });
+
+    // Zoom and Pan Logic
+    let zoomLevel = 1;
+    let isDragging = false;
+    let startX, startY;
+    let translateX = 0;
+    let translateY = 0;
+    const canvasWrapper = document.getElementById('canvas-wrapper');
+
+    const updateTransform = () => {
+        if (!canvas) return;
+        canvas.style.transform = `translate(${translateX}px, ${translateY}px) scale(${zoomLevel})`;
+        const zl = document.getElementById('zoom-level');
+        if (zl) zl.textContent = Math.round(zoomLevel * 100) + '%';
+    };
+
+    document.getElementById('zoom-in')?.addEventListener('click', () => { zoomLevel = Math.min(zoomLevel + 0.1, 2); updateTransform(); });
+    document.getElementById('zoom-out')?.addEventListener('click', () => { zoomLevel = Math.max(zoomLevel - 0.1, 0.5); updateTransform(); });
+    document.getElementById('zoom-reset')?.addEventListener('click', () => { zoomLevel = 1; translateX = 0; translateY = 0; updateTransform(); });
+
+    canvasWrapper?.addEventListener('wheel', (e) => {
+        if (e.ctrlKey) {
+            e.preventDefault();
+            const delta = e.deltaY > 0 ? -0.1 : 0.1;
+            zoomLevel = Math.max(0.5, Math.min(zoomLevel + delta, 2));
+            updateTransform();
+        }
+    });
+
+    canvasWrapper?.addEventListener('mousedown', (e) => {
+        if (e.target === canvasWrapper || e.target === canvas) {
+            isDragging = true;
+            startX = e.clientX - translateX;
+            startY = e.clientY - translateY;
+            canvasWrapper.style.cursor = 'grabbing';
+        }
+    });
+
+    window.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        translateX = e.clientX - startX;
+        translateY = e.clientY - startY;
+        updateTransform();
+    });
+
+    window.addEventListener('mouseup', () => {
+        isDragging = false;
+        if (canvasWrapper) canvasWrapper.style.cursor = 'grab';
+    });
+
+    // File buttons Logic
+    document.getElementById('btn-load')?.addEventListener('click', () => {
+        document.getElementById('file-upload').click();
+    });
+
+    document.getElementById('file-upload')?.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+            editor.value = ev.target.result;
+            document.querySelector('[data-view="code"]').click(); // switch to code view
+        };
+        reader.readAsText(file);
+    });
+
+    document.getElementById('btn-clean')?.addEventListener('click', () => {
+        editor.value = 'int main() {\n    \n    return 0;\n}';
+        canvas.innerHTML = '<div class="empty-msg">Arrastra bloques aquí para armar tu programa...</div>';
+        document.querySelectorAll('.tab-pane pre code, .table-container').forEach(el => el.innerHTML = 'Esperando compilación...');
+        statusInd.textContent = 'Listo';
+        statusInd.className = 'status-indicator';
+        document.getElementById('out-filename').value = '';
+        document.getElementById('out-directory').value = '';
+        zoomLevel = 1; translateX = 0; translateY = 0; updateTransform();
+    });
+
+    document.getElementById('btn-save')?.addEventListener('click', () => {
+        let content = "=== RESULTADOS DE COMPILACIÓN ===\n\n";
+        content += "[ASM]\n" + document.getElementById('out-asm').textContent + "\n\n";
+        content += "[AST]\n" + document.getElementById('out-ast').textContent + "\n\n";
+        content += "[LOG]\n" + document.getElementById('out-echo').textContent + "\n\n";
+        
+        const blob = new Blob([content], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = (document.getElementById('out-filename').value || 'noname') + '_resultados.txt';
+        a.click();
+        URL.revokeObjectURL(url);
     });
 
     // Results Tabs
@@ -200,6 +293,68 @@ document.addEventListener('DOMContentLoaded', () => {
         editor.value = code;
     }
 
+    function generateCanvasFromCode() {
+        const code = editor.value;
+        const mainMatch = code.match(/int\s+main\s*\(\)\s*\{([\s\S]*?)return\s+0;/);
+        if (!mainMatch) return;
+        
+        let body = mainMatch[1];
+        
+        // Limpiar canvas
+        canvas.innerHTML = '';
+        canvas.appendChild(createBlock('start'));
+        
+        // Regex simplificado para las lineas
+        const lines = body.split('\n').map(l => l.trim()).filter(l => l);
+        
+        for (let i = 0; i < lines.length; i++) {
+            let line = lines[i];
+            if (line === '}' || line === '') continue;
+            
+            if (line.startsWith('if')) {
+                const match = line.match(/if\s*\((.*?)\)/);
+                if (match) {
+                    const block = createBlock('if');
+                    block.querySelector('[name="cond"]').value = match[1];
+                    canvas.appendChild(block);
+                }
+            } else if (line.startsWith('while')) {
+                const match = line.match(/while\s*\((.*?)\)/);
+                if (match) {
+                    const block = createBlock('while');
+                    block.querySelector('[name="cond"]').value = match[1];
+                    canvas.appendChild(block);
+                }
+            } else if (line.startsWith('println') || line.startsWith('print') || line.startsWith('printf')) {
+                const match = line.match(/(println|print|printf)\s*\((.*?)\)/);
+                if (match) {
+                    const block = createBlock('print');
+                    block.querySelector('[name="func"]').value = match[1];
+                    block.querySelector('[name="val"]').value = match[2];
+                    canvas.appendChild(block);
+                }
+            } else if (line.startsWith('scanf')) {
+                const match = line.match(/scanf\s*\(\s*".*?"\s*,\s*(.*?)\)/);
+                if (match) {
+                    const block = createBlock('input');
+                    block.querySelector('[name="var"]').value = match[1];
+                    canvas.appendChild(block);
+                }
+            } else {
+                // Asignacion
+                const assignMatch = line.match(/^(?:(int|float)\s+)?([a-zA-Z_]\w*)\s*=\s*(.*?);$/);
+                if (assignMatch) {
+                    const block = createBlock('assign');
+                    if (assignMatch[1]) block.querySelector('[name="tipo"]').value = assignMatch[1];
+                    else block.querySelector('[name="tipo"]').value = '';
+                    block.querySelector('[name="var"]').value = assignMatch[2];
+                    block.querySelector('[name="exp"]').value = assignMatch[3];
+                    canvas.appendChild(block);
+                }
+            }
+        }
+    }
+
     // Compile action
     compileBtn.addEventListener('click', async () => {
         const activeView = document.querySelector('.view-btn.active').dataset.view;
@@ -217,11 +372,14 @@ document.addEventListener('DOMContentLoaded', () => {
         statusInd.textContent = 'Compilando...';
         statusInd.className = 'status-indicator';
         
+        const filename = document.getElementById('out-filename')?.value || 'noname';
+        const directory = document.getElementById('out-directory')?.value || './';
+        
         try {
             const response = await fetch('/api/compile', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ codigo: code })
+                body: JSON.stringify({ codigo: code, filename, directory })
             });
             
             const result = await response.json();
@@ -246,7 +404,32 @@ document.addEventListener('DOMContentLoaded', () => {
                 document.getElementById('out-ast').textContent = 'Error al generar AST';
             }
 
+            if (result.tokens) {
+                let tokTable = `<table class="data-table"><thead><tr><th>Tipo</th><th>Valor</th></tr></thead><tbody>`;
+                result.tokens.forEach(t => {
+                    tokTable += `<tr><td>${t[0]}</td><td>${t[1]}</td></tr>`;
+                });
+                tokTable += `</tbody></table>`;
+                document.getElementById('out-tokens').innerHTML = tokTable;
+            } else {
+                document.getElementById('out-tokens').innerHTML = 'Error al generar Tokens';
+            }
+
             if (result.tabla) {
+                // Table visual representation
+                let tablaHTML = `<div class="table-title">Funciones</div><table class="data-table"><thead><tr><th>Nombre</th><th>Tipo Retorno</th><th>Clase</th><th>Parámetros</th></tr></thead><tbody>`;
+                result.tabla.funciones?.forEach(f => {
+                    const params = (f.parametros || []).map(p => `${p.tipo} ${p.nombre}`).join(', ') || '(ninguno)';
+                    tablaHTML += `<tr><td>${f.nombre}</td><td>${f.tipo_retorno || f.tipo}</td><td>${f.clase || '-'}</td><td>${params}</td></tr>`;
+                });
+                tablaHTML += `</tbody></table><br><div class="table-title">Variables</div><table class="data-table"><thead><tr><th>Nombre</th><th>Tipo</th><th>Ámbito</th><th>Clase</th></tr></thead><tbody>`;
+                result.tabla.variables?.forEach(v => {
+                    tablaHTML += `<tr><td>${v.nombre}</td><td>${v.tipo}</td><td>${v.ambito}</td><td>${v.clase}</td></tr>`;
+                });
+                tablaHTML += `</tbody></table>`;
+                document.getElementById('out-sym').innerHTML = tablaHTML;
+                
+                // Echo log representation
                 let tablaStr = "=== FUNCIONES ===\n";
                 result.tabla.funciones?.forEach(f => {
                     tablaStr += `- ${f.tipo_retorno || f.tipo} ${f.nombre}(${f.params || f.parametros || ''}) [Ámbito: ${f.ambito || 'global'}]\n`;
@@ -255,14 +438,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 result.tabla.variables?.forEach(v => {
                     tablaStr += `- ${v.tipo} ${v.nombre} [Clase: ${v.clase}] (Ámbito: ${v.ambito}) ${v.usado ? '' : '[NO USADA]'}\n`;
                 });
-                document.getElementById('out-sym').textContent = tablaStr;
+                // we'll append tablaStr to Echo Log below
+                result._tablaStr = tablaStr;
             } else {
-                document.getElementById('out-sym').textContent = 'Error al generar Tabla de Símbolos';
+                document.getElementById('out-sym').innerHTML = 'Error al generar Tabla de Símbolos';
             }
 
             let echoLog = '--- INICIO DE COMPILACIÓN ---\n' + (result.log || '');
             if (result.tokens && result.tokens.length > 0) {
                 echoLog = '=== TOKENS ENCONTRADOS ===\n' + result.tokens.map(t => `(${t[0]}, '${t[1]}')`).join('\n') + '\n\n' + echoLog;
+            }
+            if (result._tablaStr) {
+                echoLog += '\n\n' + result._tablaStr;
             }
 
             if (!result.ok && result.errores?.length > 0) {

@@ -22,19 +22,39 @@ class CompilerHandler(http.server.SimpleHTTPRequestHandler):
                 data = json.loads(post_data.decode('utf-8'))
                 codigo = data.get('codigo', '')
                 
+                # Configuracion de salida
+                filename = data.get('filename', '').strip()
+                if not filename:
+                    filename = "noname"
+                    
+                directory = data.get('directory', '').strip()
+                if not directory:
+                    directory = "."
+                else:
+                    # Evitar saltos de directorio inseguros de forma básica
+                    directory = directory.replace("..", "")
+                
+                # Crear directorio si no existe
+                out_dir = os.path.abspath(directory)
+                if not os.path.exists(out_dir):
+                    os.makedirs(out_dir)
+                
+                asm_path = os.path.join(out_dir, f"{filename}.asm")
+                
                 # Compilar a ASM usando nuestro main.py
-                resultado = compilar_codigo(codigo, "salida.asm")
+                resultado = compilar_codigo(codigo, asm_path)
                 
                 if resultado["ok"]:
                     # Generar el ejecutable NASM
-                    exito_asm, log_asm = compilar_asm("salida.asm")
+                    exito_asm, log_asm = compilar_asm(asm_path)
                     resultado["log"] += f"\n\n{log_asm}"
                     
                     if exito_asm:
                         # Ejecutar el archivo compilado
                         try:
                             # Asegurar que se ejecuta el binario local
-                            executable_path = "salida.exe" if os.name == "nt" else "./salida"
+                            base_exec_path = asm_path.replace(".asm", "")
+                            executable_path = f"{base_exec_path}.exe" if os.name == "nt" else f"./{base_exec_path}"
                             res_exec = subprocess.run(executable_path, capture_output=True, text=True, timeout=5, shell=True)
                             resultado["log"] += f"\n\n[EJECUCIÓN]\n{res_exec.stdout}"
                             if res_exec.stderr:

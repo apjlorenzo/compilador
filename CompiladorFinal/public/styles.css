@@ -200,15 +200,28 @@ body {
 }
 
 /* Flowchart Canvas */
-.flowchart-canvas {
+.canvas-wrapper {
     flex: 1;
+    overflow: hidden;
+    position: relative;
     background: rgba(0, 0, 0, 0.2);
-    overflow-y: auto;
+    cursor: grab;
+}
+
+.canvas-wrapper:active {
+    cursor: grabbing;
+}
+
+.flowchart-canvas {
     padding: 2rem;
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 2rem;
+    transform-origin: top center;
+    min-height: 100%;
+    width: 100%;
+    transition: transform 0.05s ease;
 }
 
 .empty-msg {
@@ -217,20 +230,24 @@ body {
     margin-top: 3rem;
 }
 
-/* Flowchart Blocks */
 .flow-block {
     position: relative;
-    padding: 1rem 1.5rem;
+    padding: 1.25rem 1.75rem;
     min-width: 250px;
     color: white;
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: 0.75rem;
     cursor: grab;
-    transition: transform 0.2s;
+    transition: box-shadow 0.2s, transform 0.2s;
     background: transparent;
     border: none;
     align-items: center;
+    font-size: 1.05rem;
+}
+
+.flow-block:hover {
+    box-shadow: 0 0 15px rgba(255, 255, 255, 0.1);
 }
 
 .flow-block:not(:last-child)::after {
@@ -435,4 +452,138 @@ pre {
     -webkit-backdrop-filter: blur(12px);
     border: 1px solid var(--border);
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+/* Sidebar Config Section */
+.config-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    margin-bottom: 1.5rem;
+    padding-bottom: 1.5rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.input-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.input-group label {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.input-group input {
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid var(--border);
+    color: white;
+    padding: 0.5rem;
+    border-radius: 4px;
+    font-family: 'Fira Code', monospace;
+    font-size: 0.85rem;
+    transition: border-color 0.2s;
+}
+
+.input-group input:focus {
+    border-color: var(--accent);
+    outline: none;
+}
+
+.btn-group {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.btn-secondary {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-main);
+    border: 1px solid var(--border);
+    padding: 0.6rem;
+    border-radius: 6px;
+    cursor: pointer;
+    flex: 1;
+    transition: all 0.2s;
+    font-size: 0.85rem;
+}
+
+.btn-secondary:hover {
+    background: rgba(255, 255, 255, 0.15);
+    transform: translateY(-1px);
+}
+
+.full-width {
+    width: 100%;
+}
+
+/* Zoom Controls */
+.zoom-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: rgba(0, 0, 0, 0.2);
+    padding: 0.25rem 0.5rem;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+}
+
+.zoom-controls button {
+    background: transparent;
+    border: none;
+    color: var(--text-main);
+    cursor: pointer;
+    padding: 0.25rem;
+    border-radius: 4px;
+    font-size: 1rem;
+}
+
+.zoom-controls button:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.zoom-controls span {
+    font-size: 0.8rem;
+    min-width: 45px;
+    text-align: center;
+}
+
+/* Tables for Symbols and Tokens */
+.table-container {
+    width: 100%;
+    overflow-x: auto;
+}
+
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+    font-family: 'Fira Code', monospace;
+}
+
+.data-table th, .data-table td {
+    padding: 0.5rem;
+    text-align: left;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+
+.data-table th {
+    color: #60a5fa;
+    font-weight: 600;
+    position: sticky;
+    top: 0;
+    background: var(--bg-surface);
+    z-index: 5;
+}
+
+.data-table tr:hover td {
+    background: rgba(255,255,255,0.05);
+}
+
+.table-title {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    margin: 1rem 0 0.5rem 0;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
 }

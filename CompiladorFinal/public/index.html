@@ -20,6 +20,23 @@
                 <h1>Compilador</h1>
             </div>
 
+            <div class="config-section">
+                <div class="input-group">
+                    <label>Nombre Archivo</label>
+                    <input type="text" id="out-filename" placeholder="noname">
+                </div>
+                <div class="input-group">
+                    <label>Directorio</label>
+                    <input type="text" id="out-directory" placeholder="./">
+                </div>
+                <div class="btn-group">
+                    <input type="file" id="file-upload" accept=".txt,.c" style="display: none;">
+                    <button id="btn-load" class="btn-secondary" title="Cargar código fuente">📂 Cargar</button>
+                    <button id="btn-clean" class="btn-secondary" title="Limpiar todo">🧹 Limpiar</button>
+                </div>
+                <button id="btn-save" class="btn-secondary full-width" title="Guardar resultados de compilación">💾 Guardar Datos</button>
+            </div>
+
             <div class="toolbar-title">Diagramas de Flujo</div>
             <div class="toolbar" id="toolbox">
                 <div class="tool-btn" draggable="true" data-type="start">
@@ -52,12 +69,20 @@
                     <button class="view-btn active" data-view="visual">Diagrama de Flujo</button>
                     <button class="view-btn" data-view="code">Código Fuente</button>
                 </div>
+                <div class="zoom-controls">
+                    <button id="zoom-out" title="Alejar">➖</button>
+                    <span id="zoom-level">100%</span>
+                    <button id="zoom-in" title="Acercar">➕</button>
+                    <button id="zoom-reset" title="Restablecer">🔄</button>
+                </div>
                 <div class="status-indicator" id="compile-status">Listo</div>
             </div>
 
             <div id="visual-view" class="view-pane active">
-                <div class="flowchart-canvas" id="canvas">
-                    <div class="empty-msg">Arrastra bloques aquí para armar tu programa...</div>
+                <div class="canvas-wrapper" id="canvas-wrapper">
+                    <div class="flowchart-canvas" id="canvas">
+                        <div class="empty-msg">Arrastra bloques aquí para armar tu programa...</div>
+                    </div>
                 </div>
             </div>
 
@@ -77,6 +102,7 @@
                 <button class="tab-btn" data-target="tab-py">Python</button>
                 <button class="tab-btn" data-target="tab-rust">Rust</button>
                 <button class="tab-btn" data-target="tab-ast">AST</button>
+                <button class="tab-btn" data-target="tab-tokens">Tokens</button>
                 <button class="tab-btn" data-target="tab-sym">Símbolos</button>
                 <button class="tab-btn" data-target="tab-echo">ECHO (Log)</button>
             </div>
@@ -97,8 +123,11 @@
                 <div id="tab-ast" class="tab-pane">
                     <pre><code id="out-ast">Esperando compilación...</code></pre>
                 </div>
+                <div id="tab-tokens" class="tab-pane">
+                    <div id="out-tokens" class="table-container">Esperando compilación...</div>
+                </div>
                 <div id="tab-sym" class="tab-pane">
-                    <pre><code id="out-sym">Esperando compilación...</code></pre>
+                    <div id="out-sym" class="table-container">Esperando compilación...</div>
                 </div>
                 <div id="tab-echo" class="tab-pane">
                     <pre><code id="out-echo" class="echo-log">Compilando...\nnasm...\nld...\nejecutado con...</code></pre>
