@@ -3,7 +3,28 @@ document.addEventListener('DOMContentLoaded', () => {
     const compileBtn = document.getElementById('btn-compile');
     const statusInd = document.getElementById('compile-status');
     const canvas = document.getElementById('canvas');
+    const lineNumbers = document.getElementById('code-line-numbers');
     let draggedType = null;
+
+    const updateLineNumbers = () => {
+        if (!editor || !lineNumbers) return;
+        const count = Math.max(1, editor.value.split('\n').length);
+        lineNumbers.textContent = Array.from({ length: count }, (_, index) => index + 1).join('\n');
+        lineNumbers.scrollTop = editor.scrollTop;
+    };
+
+    editor?.addEventListener('input', updateLineNumbers);
+    editor?.addEventListener('scroll', () => {
+        if (lineNumbers) lineNumbers.scrollTop = editor.scrollTop;
+    });
+
+    document.querySelectorAll('.tool-btn').forEach(btn => {
+        const icon = btn.querySelector('.icon');
+        if (icon) {
+            icon.textContent = '';
+            icon.className = `tool-shape ${btn.dataset.type}-preview`;
+        }
+    });
     
     // Setup View Tabs
     document.querySelectorAll('.view-btn').forEach(btn => {
@@ -37,6 +58,15 @@ document.addEventListener('DOMContentLoaded', () => {
         canvas.style.transform = `translate(${translateX}px, ${translateY}px) scale(${zoomLevel})`;
         const zl = document.getElementById('zoom-level');
         if (zl) zl.textContent = Math.round(zoomLevel * 100) + '%';
+    };
+
+    const resizeCanvasToContent = () => {
+        if (!canvas || !canvasWrapper) return;
+        const blocks = [...canvas.querySelectorAll('.flow-block')];
+        const height = Math.max(canvasWrapper.clientHeight, blocks.length * 150 + 180);
+        const width = Math.max(canvasWrapper.clientWidth, ...blocks.map(b => b.scrollWidth + 180), 760);
+        canvas.style.minHeight = `${height}px`;
+        canvas.style.minWidth = `${width}px`;
     };
 
     document.getElementById('zoom-in')?.addEventListener('click', () => { zoomLevel = Math.min(zoomLevel + 0.1, 2); updateTransform(); });
@@ -84,6 +114,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const reader = new FileReader();
         reader.onload = (ev) => {
             editor.value = ev.target.result;
+            updateLineNumbers();
             document.querySelector('[data-view="code"]').click(); // switch to code view
         };
         reader.readAsText(file);
@@ -91,6 +122,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('btn-clean')?.addEventListener('click', () => {
         editor.value = 'int main() {\n    \n    return 0;\n}';
+        updateLineNumbers();
         canvas.innerHTML = '<div class="empty-msg">Arrastra bloques aquí para armar tu programa...</div>';
         document.querySelectorAll('.tab-pane pre code, .table-container').forEach(el => el.innerHTML = 'Esperando compilación...');
         statusInd.textContent = 'Listo';
@@ -113,6 +145,66 @@ document.addEventListener('DOMContentLoaded', () => {
         a.download = (document.getElementById('out-filename').value || 'noname') + '_resultados.txt';
         a.click();
         URL.revokeObjectURL(url);
+    });
+
+    // Interactive Terminal
+    let termInterval = null;
+    async function startTerminalPoll(ejecutable) {
+        if(termInterval) clearInterval(termInterval);
+        
+        const termOut = document.getElementById('term-output');
+        const termInRow = document.getElementById('term-input-row');
+        termOut.textContent = 'Iniciando proceso...\n';
+        termInRow.style.display = 'none';
+
+        try {
+            const runResponse = await fetch('/api/run', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ejecutable })
+            });
+            if (!runResponse.ok) {
+                const runError = await runResponse.json().catch(() => ({}));
+                throw new Error(runError.error || 'No se pudo iniciar el ejecutable.');
+            }
+            termInRow.style.display = 'flex';
+            document.getElementById('term-input').focus();
+            
+            termInterval = setInterval(async () => {
+                try {
+                    const res = await fetch('/api/stdout');
+                    const data = await res.json();
+                    if(data.salida) {
+                        termOut.textContent += data.salida;
+                        termOut.scrollTop = termOut.scrollHeight;
+                    }
+                    if(data.estado === 'finished' || data.estado === 'idle') {
+                        clearInterval(termInterval);
+                        termInRow.style.display = 'none';
+                        termOut.textContent += data.estado === 'idle'
+                            ? '\n\n[No hay proceso en ejecucion]'
+                            : '\n\n[Proceso finalizado]';
+                        termOut.scrollTop = termOut.scrollHeight;
+                    }
+                } catch(e) {}
+            }, 300); // Polling rapido
+        } catch(e) {
+            termOut.textContent += '\nError al iniciar: ' + e;
+        }
+    }
+
+    document.getElementById('term-input')?.addEventListener('keypress', async (e) => {
+        if(e.key === 'Enter') {
+            const text = e.target.value;
+            e.target.value = '';
+            try {
+                await fetch('/api/stdin', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ texto: text })
+                });
+            } catch(e) {}
+        }
     });
 
     // Results Tabs
@@ -152,6 +244,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const block = createBlock(draggedType);
         canvas.appendChild(block);
         draggedType = null;
+        resizeCanvasToContent();
         generateCodeFromCanvas();
     });
 
@@ -169,51 +262,64 @@ document.addEventListener('DOMContentLoaded', () => {
                 bodyHTML = `<div style="text-align:center;font-size:0.8rem;opacity:0.7">Contenedor Principal</div>`;
                 break;
             case 'assign':
-                title = 'Asignación';
+                title = 'Asignar';
                 bodyHTML = `
                     <div class="block-body">
                         <select class="block-input short" name="tipo">
                             <option value="int">int</option>
                             <option value="float">float</option>
-                            <option value="">(ninguno)</option>
+                            <option value="string">string</option>
+                            <option value="">(none)</option>
                         </select>
-                        <input type="text" class="block-input short" placeholder="var" name="var">
-                        =
-                        <input type="text" class="block-input" placeholder="expresión" name="exp">
+                        <input type="text" class="block-input short" placeholder="A" name="var">
+                        &lt;-
+                        <input type="text" class="block-input" placeholder="B+i" name="exp">
                     </div>`;
                 break;
             case 'if':
-                title = 'Decisión (Si)';
+                title = 'if';
                 bodyHTML = `
                     <div class="block-body">
-                        Si <input type="text" class="block-input" placeholder="condición" name="cond">
+                        <input type="text" class="block-input" placeholder="A>B" name="cond">
                     </div>`;
                 break;
             case 'while':
-                title = 'Bucle (Mientras)';
+                title = 'while';
                 bodyHTML = `
                     <div class="block-body">
-                        Mientras <input type="text" class="block-input" placeholder="condición" name="cond">
+                        <input type="text" class="block-input" placeholder="N<10" name="cond">
+                    </div>`;
+                break;
+            case 'for':
+                title = 'for';
+                bodyHTML = `
+                    <div class="block-body" style="display:flex; flex-direction:column; gap:4px;">
+                        <div>Init: <input type="text" class="block-input" placeholder="int i = 0" name="init"></div>
+                        <div>Cond: <input type="text" class="block-input" placeholder="i < 10" name="cond"></div>
+                        <div>Inc: <input type="text" class="block-input" placeholder="i++" name="inc"></div>
                     </div>`;
                 break;
             case 'print':
-                title = 'Salida (Imprimir)';
+                title = 'print';
                 bodyHTML = `
                     <div class="block-body">
-                        <select class="block-input short" name="func">
-                            <option value="println" selected>println</option>
-                            <option value="print">print</option>
-                            <option value="printf">printf</option>
-                        </select>
-                        <input type="text" class="block-input" placeholder='"Hola"' name="val">
+                        <input type="text" class="block-input" placeholder="'Hola !'" name="val">
                     </div>`;
                 break;
             case 'input':
-                title = 'Entrada (Leer)';
+                title = 'Leer';
                 bodyHTML = `
                     <div class="block-body">
-                        scanf("%d", <input type="text" class="block-input short" placeholder="var" name="var">);
+                        <input type="text" class="block-input short" placeholder="Dato1" name="var">
                     </div>`;
+                break;
+            case 'else':
+                title = 'Si No (Else)';
+                bodyHTML = `<div style="text-align:center;font-size:0.8rem;opacity:0.7">Rama Falsa</div>`;
+                break;
+            case 'end':
+                title = 'Fin Bloque';
+                bodyHTML = `<div style="text-align:center;font-size:0.8rem;opacity:0.7">Cierra if/while/for anterior</div>`;
                 break;
         }
 
@@ -229,6 +335,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         block.querySelector('.delete-btn').addEventListener('click', () => {
             block.remove();
+            resizeCanvasToContent();
             generateCodeFromCanvas();
         });
 
@@ -240,7 +347,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function generateCodeFromCanvas() {
-        let code = 'int main() {\n';
+        let code = '#include <stdio.h>\nint main() {\n';
         let indent = '    ';
         let openBlocks = [];
 
@@ -259,9 +366,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 code += `${indent}${tipo ? tipo + ' ' : ''}${v} = ${exp};\n`;
             }
             else if (type === 'print') {
-                const func = block.querySelector('[name="func"]').value;
                 const val = block.querySelector('[name="val"]').value || '""';
-                code += `${indent}${func}(${val});\n`;
+                code += `${indent}println(${val});\n`;
             }
             else if (type === 'input') {
                 const v = block.querySelector('[name="var"]').value || 'temp';
@@ -279,6 +385,29 @@ document.addEventListener('DOMContentLoaded', () => {
                 openBlocks.push('while');
                 indent += '    ';
             }
+            else if (type === 'for') {
+                const init = block.querySelector('[name="init"]').value || 'int i = 0';
+                const cond = block.querySelector('[name="cond"]').value || 'i < 1';
+                const inc = block.querySelector('[name="inc"]').value || 'i++';
+                code += `${indent}for (${init}; ${cond}; ${inc}) {\n`;
+                openBlocks.push('for');
+                indent += '    ';
+            }
+            else if (type === 'else') {
+                if (openBlocks.length > 0 && openBlocks[openBlocks.length - 1] === 'if') {
+                    indent = indent.slice(0, -4);
+                    code += `${indent}} else {\n`;
+                    indent += '    ';
+                    openBlocks[openBlocks.length - 1] = 'else';
+                }
+            }
+            else if (type === 'end') {
+                if (openBlocks.length > 0) {
+                    indent = indent.slice(0, -4);
+                    code += `${indent}}\n`;
+                    openBlocks.pop();
+                }
+            }
         });
 
         // Close any open blocks (simplification: visual blocks apply sequentially for this demo)
@@ -291,6 +420,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         code += '    return 0;\n}';
         editor.value = code;
+        updateLineNumbers();
     }
 
     function generateCanvasFromCode() {
@@ -325,11 +455,19 @@ document.addEventListener('DOMContentLoaded', () => {
                     block.querySelector('[name="cond"]').value = match[1];
                     canvas.appendChild(block);
                 }
+            } else if (line.startsWith('for')) {
+                const match = line.match(/for\s*\((.*?);(.*?);(.*?)\)/);
+                if (match) {
+                    const block = createBlock('for');
+                    block.querySelector('[name="init"]').value = match[1].trim();
+                    block.querySelector('[name="cond"]').value = match[2].trim();
+                    block.querySelector('[name="inc"]').value = match[3].trim();
+                    canvas.appendChild(block);
+                }
             } else if (line.startsWith('println') || line.startsWith('print') || line.startsWith('printf')) {
                 const match = line.match(/(println|print|printf)\s*\((.*?)\)/);
                 if (match) {
                     const block = createBlock('print');
-                    block.querySelector('[name="func"]').value = match[1];
                     block.querySelector('[name="val"]').value = match[2];
                     canvas.appendChild(block);
                 }
@@ -342,7 +480,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             } else {
                 // Asignacion
-                const assignMatch = line.match(/^(?:(int|float)\s+)?([a-zA-Z_]\w*)\s*=\s*(.*?);$/);
+                const assignMatch = line.match(/^(?:(int|float|string)\s+)?([a-zA-Z_]\w*)\s*=\s*(.*?);$/);
                 if (assignMatch) {
                     const block = createBlock('assign');
                     if (assignMatch[1]) block.querySelector('[name="tipo"]').value = assignMatch[1];
@@ -353,7 +491,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
         }
+        resizeCanvasToContent();
     }
+
+    resizeCanvasToContent();
+    updateLineNumbers();
 
     // Compile action
     compileBtn.addEventListener('click', async () => {
@@ -429,8 +571,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 tablaHTML += `</tbody></table>`;
                 document.getElementById('out-sym').innerHTML = tablaHTML;
                 
-                // Echo log representation
-                let tablaStr = "=== FUNCIONES ===\n";
+                /*
+                let tablaStr = "";
                 result.tabla.funciones?.forEach(f => {
                     tablaStr += `- ${f.tipo_retorno || f.tipo} ${f.nombre}(${f.params || f.parametros || ''}) [Ámbito: ${f.ambito || 'global'}]\n`;
                 });
@@ -440,22 +582,31 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
                 // we'll append tablaStr to Echo Log below
                 result._tablaStr = tablaStr;
+                */
             } else {
                 document.getElementById('out-sym').innerHTML = 'Error al generar Tabla de Símbolos';
             }
 
-            let echoLog = '--- INICIO DE COMPILACIÓN ---\n' + (result.log || '');
-            if (result.tokens && result.tokens.length > 0) {
-                echoLog = '=== TOKENS ENCONTRADOS ===\n' + result.tokens.map(t => `(${t[0]}, '${t[1]}')`).join('\n') + '\n\n' + echoLog;
-            }
-            if (result._tablaStr) {
+            let echoLog = buildCompilationLog(result);
+            /*
+            if (false) {
                 echoLog += '\n\n' + result._tablaStr;
             }
 
             if (!result.ok && result.errores?.length > 0) {
                 echoLog += '\n\n--- ERRORES SEMÁNTICOS ---\n' + result.errores.join('\n');
             }
+            */
             document.getElementById('out-echo').textContent = echoLog;
+            
+            // Si la compilacion y ensamblado fue exitosa, correr en terminal interactiva
+            if (result.ejecutable) {
+                startTerminalPoll(result.ejecutable);
+            } else {
+                document.getElementById('term-output').textContent = result.ok
+                    ? 'Compilacion finalizada, pero no se recibio ruta de ejecutable.'
+                    : 'No se ejecuto porque la compilacion termino con errores. Revisa ECHO (Log).';
+            }
             
         } catch (error) {
             console.error(error);
@@ -467,4 +618,35 @@ document.addEventListener('DOMContentLoaded', () => {
             compileBtn.disabled = false;
         }
     });
+
+    function buildCompilationLog(result) {
+        const lines = [];
+        lines.push('=== COMPILACION ===');
+        lines.push(`Estado: ${result.ok ? 'Correcta' : 'Con errores'}`);
+        lines.push('');
+
+        if (result.errores?.length) {
+            lines.push(`Errores (${result.errores.length}):`);
+            result.errores.forEach((error, index) => lines.push(`${index + 1}. ${error}`));
+            lines.push('');
+        } else {
+            lines.push('Errores: ninguno');
+            lines.push('');
+        }
+
+        if (result.avisos?.length) {
+            lines.push(`Advertencias (${result.avisos.length}):`);
+            result.avisos.forEach((aviso, index) => lines.push(`${index + 1}. ${aviso}`));
+            lines.push('');
+        }
+
+        if (result.ejecutable) {
+            lines.push(`Ejecutable: ${result.ejecutable}`);
+            lines.push('');
+        }
+
+        lines.push('=== FASES / NASM ===');
+        lines.push(result.log || 'Sin mensajes de compilacion.');
+        return lines.join('\n');
+    }
 });

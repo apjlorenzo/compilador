@@ -159,24 +159,28 @@ class ErrorSemantico:
         "RETORNO_TIPO"      : "Tipo de retorno incompatible",
     }
 
-    def __init__(self, codigo, mensaje, ambito):
+    def __init__(self, codigo, mensaje, ambito, linea="?"):
         self.codigo  = codigo
         self.mensaje = mensaje
         self.ambito  = ambito
+        self.linea   = linea
 
     def __str__(self):
         etq = self.ETIQUETAS.get(self.codigo, self.codigo)
-        return f"  [ERROR]  {etq:<30} | {self.mensaje}  (ámbito: {self.ambito})"
+        linea_str = f"Línea {self.linea}" if self.linea != "?" else "Línea desconocida"
+        return f"  [ERROR]  {etq:<30} | {linea_str} - {self.mensaje}  (ámbito: {self.ambito})"
 
 
 class AdvertenciaSemantica:
-    def __init__(self, codigo, mensaje, ambito):
+    def __init__(self, codigo, mensaje, ambito, linea="?"):
         self.codigo  = codigo
         self.mensaje = mensaje
         self.ambito  = ambito
+        self.linea   = linea
 
     def __str__(self):
-        return f"  [AVISO]  {'Advertencia':<30} | {self.mensaje}  (ámbito: {self.ambito})"
+        linea_str = f"Línea {self.linea}" if self.linea != "?" else "Línea desconocida"
+        return f"  [AVISO]  {'Advertencia':<30} | {linea_str} - {self.mensaje}  (ámbito: {self.ambito})"
 
 
 # ===========================================================================
@@ -203,10 +207,21 @@ class AnalizadorSemantico:
         self._func_actual = None
         self.offset_local = 0
         self.offset_param = 8
+        self.tiene_stdio  = False
+
+    def _get_line(self, nodo):
+        if hasattr(nodo, 'nombre') and isinstance(nodo.nombre, tuple) and len(nodo.nombre) > 2: return nodo.nombre[2]
+        if hasattr(nodo, 'tipo') and isinstance(nodo.tipo, tuple) and len(nodo.tipo) > 2: return nodo.tipo[2]
+        if hasattr(nodo, 'valor') and isinstance(nodo.valor, tuple) and len(nodo.valor) > 2: return nodo.valor[2]
+        if hasattr(nodo, 'tipo_print') and isinstance(nodo.tipo_print, tuple) and len(nodo.tipo_print) > 2: return nodo.tipo_print[2]
+        if hasattr(nodo, 'variable') and isinstance(nodo.variable, tuple) and len(nodo.variable) > 2: return nodo.variable[2]
+        if hasattr(nodo, 'operador') and isinstance(nodo.operador, tuple) and len(nodo.operador) > 2: return nodo.operador[2]
+        return '?'
 
     # --- Punto de entrada --------------------------------------------------
 
     def analizar(self, ast):
+        self.tiene_stdio = getattr(ast, 'tiene_stdio', False)
         self._registrar_funciones(ast)
         for funcion in ast.funciones:
             self._analizar_funcion(funcion)
@@ -225,7 +240,7 @@ class AnalizadorSemantico:
             params   = ", ".join(f"{p.tipo[1]} {p.nombre[1]}" for p in fn.parametros) or "ninguno"
             sim = Simbolo(nombre, f"{tipo_ret}|{params}", "funcion", "global")
             if not self.tabla.insertar(sim):
-                self._err("FUNC_YA_DECLARADA", f"Función '{nombre}' ya declarada", "global")
+                self._err("FUNC_YA_DECLARADA", f"Función '{nombre}' ya declarada", "global", self._get_line(fn))
 
     # --- Análisis de función -----------------------------------------------
 
@@ -239,13 +254,13 @@ class AnalizadorSemantico:
         
         for p in nodo.parametros:
             sim = Simbolo(p.nombre[1], p.tipo[1], "parametro", nombre)
-            size = 8 if p.tipo[1] == "float" else 4
+            size = 8 if p.tipo[1] in ("float", "string") else 4
             sim.offset = self.offset_param
             self.offset_param += size
             
             if not self.tabla.insertar(sim):
                 self._err("VAR_YA_DECLARADA",
-                           f"Parámetro '{p.nombre[1]}' duplicado en '{nombre}'", nombre)
+                           f"Parámetro '{p.nombre[1]}' duplicado en '{nombre}'", nombre, self._get_line(p))
                            
         self._analizar_cuerpo(nodo.cuerpo, nombre)
         self.tabla.salir_ambito()
@@ -272,10 +287,10 @@ class AnalizadorSemantico:
                     if set([tipo_fn, tipo_expr]) == {"int", "float"}:
                         self._avi("RETORNO_TIPO",
                                    f"Retorno '{tipo_expr}' en función '{tipo_fn}' (conversión implícita)",
-                                   ambito)
+                                   ambito, self._get_line(inst))
                     else:
                         self._err("RETORNO_TIPO",
-                                   f"Retorno '{tipo_expr}' incompatible con '{tipo_fn}'", ambito)
+                                   f"Retorno '{tipo_expr}' incompatible con '{tipo_fn}'", ambito, self._get_line(inst))
 
         elif isinstance(inst, NodoWhile):
             self._tipo_expr(inst.condicion, ambito)
@@ -311,16 +326,22 @@ class AnalizadorSemantico:
         elif isinstance(inst, NodoLlamadaFuncion):
             self._verificar_llamada(inst, ambito)
 
-        elif isinstance(inst, NodoImprimir):
-            for arg in inst.argumentos:
-                if not isinstance(arg, NodoString):
-                    self._tipo_expr(arg, ambito)
+        elif isinstance(inst, NodoImprimir) or isinstance(inst, NodoPrint):
+            requiere_stdio = isinstance(inst, NodoImprimir) and inst.tipo[1] in ("printf", "puts")
+            if requiere_stdio and not self.tiene_stdio:
+                self._err("FUNC_NO_DECLARADA", "Uso de función de I/O sin haber incluido <stdio.h>", ambito, self._get_line(inst))
+            if isinstance(inst, NodoImprimir):
+                for arg in inst.argumentos:
+                    if not isinstance(arg, NodoString):
+                        self._tipo_expr(arg, ambito)
 
         elif isinstance(inst, NodoEntrada):
+            if inst.tipo[1] == "scanf" and not self.tiene_stdio:
+                self._err("FUNC_NO_DECLARADA", "Uso de scanf sin haber incluido <stdio.h>", ambito, self._get_line(inst))
             sim = self.tabla.buscar(inst.variable[1])
             if sim is None:
                 self._err("VAR_NO_DECLARADA",
-                           f"Variable '{inst.variable[1]}' usada en scanf sin declarar", ambito)
+                           f"Variable '{inst.variable[1]}' usada en scanf sin declarar", ambito, self._get_line(inst))
             else:
                 sim.usado = True
                 inst.sim_clase = sim.clase
@@ -331,32 +352,38 @@ class AnalizadorSemantico:
     def _analizar_asignacion(self, nodo, ambito, clase="variable_local"):
         nombre    = nodo.nombre[1]
         tipo_decl = nodo.tipo[1]
+        es_declaracion = getattr(nodo, "es_declaracion", True)
         sim = Simbolo(nombre, tipo_decl, clase, ambito)
         
         # Calcular offset si no está declarado
         existente = self.tabla.buscar(nombre)
-        if existente and existente.ambito == ambito:
+        if not es_declaracion and existente is None:
+            self._err("VAR_NO_DECLARADA",
+                       f"Variable '{nombre}' reasignada sin declarar", ambito, self._get_line(nodo))
+        if (not es_declaracion and existente) or (es_declaracion and existente and existente.ambito == ambito):
             sim = existente
+            tipo_decl = sim.tipo
+            nodo.tipo = ("KEYWORD", tipo_decl)
         else:
-            size = 8 if tipo_decl == "float" else 4
+            size = 8 if tipo_decl in ("float", "string") else 4
             self.offset_local += size
             sim.offset = -self.offset_local
         
         nodo.sim_clase = sim.clase
         nodo.offset = sim.offset
         
-        if not self.tabla.insertar(sim):
+        if es_declaracion and not self.tabla.insertar(sim):
             self._err("VAR_YA_DECLARADA",
-                       f"Variable '{nombre}' ya declarada en '{ambito}'", ambito)
+                       f"Variable '{nombre}' ya declarada en '{ambito}'", ambito, self._get_line(nodo))
         tipo_expr = self._tipo_expr(nodo.expresion, ambito)
         if tipo_expr and tipo_decl != tipo_expr:
             if set([tipo_decl, tipo_expr]) == {"int", "float"}:
                 self._avi("TIPO_INCOMPATIBLE",
                            f"Asignación de '{tipo_expr}' a '{tipo_decl} {nombre}' (conversión implícita)",
-                           ambito)
+                           ambito, self._get_line(nodo))
             else:
                 self._err("TIPO_INCOMPATIBLE",
-                           f"No se puede asignar '{tipo_expr}' a '{tipo_decl} {nombre}'", ambito)
+                           f"No se puede asignar '{tipo_expr}' a '{tipo_decl} {nombre}'", ambito, self._get_line(nodo))
 
     # --- Inferencia de tipo ------------------------------------------------
 
@@ -376,7 +403,7 @@ class AnalizadorSemantico:
             sim = self.tabla.buscar(nodo.nombre[1])
             if sim is None:
                 self._err("VAR_NO_DECLARADA",
-                           f"Variable '{nodo.nombre[1]}' usada sin declarar", ambito)
+                           f"Variable '{nodo.nombre[1]}' usada sin declarar", ambito, self._get_line(nodo))
                 return None
             sim.usado = True
             nodo.sim_clase = sim.clase
@@ -388,15 +415,18 @@ class AnalizadorSemantico:
             td = self._tipo_expr(nodo.derecha,   ambito)
             if nodo.operador[1] == "/" and isinstance(nodo.derecha, NodoNumero):
                 if float(nodo.derecha.valor[1]) == 0.0:
-                    self._err("DIVISION_CERO", "División por cero detectada", ambito)
+                    self._err("DIVISION_CERO", "División por cero detectada", ambito, self._get_line(nodo))
             if ti is None or td is None:
+                return None
+            if ti == "string" or td == "string":
+                self._err("TIPO_INCOMPATIBLE", "Operación aritmética no soportada con tipo 'string'", ambito, self._get_line(nodo))
                 return None
             if ti == td:
                 return ti
             if set([ti, td]) == {"int", "float"}:
                 self._avi("TIPO_INCOMPATIBLE",
                            f"Operación 'int {nodo.operador[1]} float' — se promueve a float",
-                           ambito)
+                           ambito, self._get_line(nodo))
                 return "float"
             return ti
 
@@ -411,7 +441,7 @@ class AnalizadorSemantico:
         sim = self.tabla.buscar_funcion(nodo.nombre_funcion)
         if sim is None:
             self._err("FUNC_NO_DECLARADA",
-                       f"Llamada a función no declarada '{nodo.nombre_funcion}'", ambito)
+                       f"Llamada a función no declarada '{nodo.nombre_funcion}'", ambito, getattr(nodo, 'linea', "?"))
             return None
         sim.usado = True
         for arg in nodo.argumentos:
@@ -425,15 +455,15 @@ class AnalizadorSemantico:
             if sim.clase in ("variable_local", "parametro") and not sim.usado:
                 self._avi("VAR_NO_USADA",
                            f"'{sim.tipo} {sim.nombre}' declarada pero nunca usada",
-                           sim.ambito)
+                           sim.ambito, "?")
 
     # --- Helpers -----------------------------------------------------------
 
-    def _err(self, codigo, mensaje, ambito):
-        self.errores.append(ErrorSemantico(codigo, mensaje, ambito))
+    def _err(self, codigo, mensaje, ambito, linea="?"):
+        self.errores.append(ErrorSemantico(codigo, mensaje, ambito, linea))
 
-    def _avi(self, codigo, mensaje, ambito):
-        self.avisos.append(AdvertenciaSemantica(codigo, mensaje, ambito))
+    def _avi(self, codigo, mensaje, ambito, linea="?"):
+        self.avisos.append(AdvertenciaSemantica(codigo, mensaje, ambito, linea))
 
 
 # ===========================================================================

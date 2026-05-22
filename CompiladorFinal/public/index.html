@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Compilador visual</title>
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="styles.css?v=20260522-3">
     <link
         href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap"
         rel="stylesheet">
@@ -29,6 +29,7 @@
                     <label>Directorio</label>
                     <input type="text" id="out-directory" placeholder="./">
                 </div>
+                <!-- stdin removido, ahora es interactivo -->
                 <div class="btn-group">
                     <input type="file" id="file-upload" accept=".txt,.c" style="display: none;">
                     <button id="btn-load" class="btn-secondary" title="Cargar código fuente">📂 Cargar</button>
@@ -51,11 +52,20 @@
                 <div class="tool-btn" draggable="true" data-type="while">
                     <span class="icon">🔄</span> Bucle (Mientras)
                 </div>
+                <div class="tool-btn" draggable="true" data-type="for">
+                    <span class="icon">🔃</span> Bucle (Para)
+                </div>
                 <div class="tool-btn" draggable="true" data-type="print">
                     <span class="icon">📤</span> Salida (Imprimir)
                 </div>
                 <div class="tool-btn" draggable="true" data-type="input">
                     <span class="icon">📥</span> Entrada (Leer)
+                </div>
+                <div class="tool-btn" draggable="true" data-type="else">
+                    <span class="icon">🔀</span> Si No (Else)
+                </div>
+                <div class="tool-btn" draggable="true" data-type="end">
+                    <span class="icon">🛑</span> Fin Bloque
                 </div>
             </div>
 
@@ -87,10 +97,25 @@
             </div>
 
             <div id="code-view" class="view-pane">
-                <textarea id="code-editor" class="code-area" spellcheck="false">int main() {
+                <div class="code-editor-shell">
+                    <pre id="code-line-numbers" class="code-line-numbers" aria-hidden="true">1
+2
+3
+4</pre>
+                    <textarea id="code-editor" class="code-area" spellcheck="false">int main() {
     
     return 0;
 }</textarea>
+                </div>
+            </div>
+            
+            <div id="interactive-terminal" class="interactive-terminal">
+                <div class="term-header">📟 Terminal Interactiva (NASM)</div>
+                <div class="term-output" id="term-output">Esperando compilación y ejecución...</div>
+                <div class="term-input-row" id="term-input-row" style="display: none;">
+                    <span class="prompt">&gt;</span>
+                    <input type="text" id="term-input" autocomplete="off" placeholder="Escribe aquí y presiona Enter...">
+                </div>
             </div>
         </main>
 
@@ -130,13 +155,13 @@
                     <div id="out-sym" class="table-container">Esperando compilación...</div>
                 </div>
                 <div id="tab-echo" class="tab-pane">
-                    <pre><code id="out-echo" class="echo-log">Compilando...\nnasm...\nld...\nejecutado con...</code></pre>
+                    <pre><code id="out-echo" class="echo-log">Esperando compilacion...</code></pre>
                 </div>
             </div>
         </aside>
     </div>
 
-    <script src="app.js"></script>
+    <script src="app.js?v=20260522-4"></script>
 </body>
 
 </html>

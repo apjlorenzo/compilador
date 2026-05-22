@@ -98,8 +98,58 @@ body {
     box-shadow: 0 4px 12px rgba(0,0,0,0.2);
 }
 
-.icon {
-    font-size: 1.2rem;
+.tool-shape {
+    width: 34px;
+    height: 22px;
+    flex: 0 0 34px;
+    display: inline-block;
+    border: 2px solid #dbeafe;
+    background: rgba(15, 23, 42, 0.45);
+}
+
+.start-preview,
+.end-preview {
+    border-radius: 999px;
+}
+
+.assign-preview {
+    border-radius: 2px;
+}
+
+.if-preview {
+    width: 28px;
+    height: 28px;
+    transform: rotate(45deg);
+    border-color: #f59e0b;
+}
+
+.while-preview {
+    width: 30px;
+    height: 26px;
+    clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+    border-color: transparent;
+    background: rgba(245, 158, 11, 0.35);
+    outline: 2px solid #f59e0b;
+    outline-offset: -2px;
+}
+
+.for-preview {
+    clip-path: polygon(18% 0%, 82% 0%, 100% 50%, 82% 100%, 18% 100%, 0% 50%);
+    border-color: transparent;
+    background: rgba(234, 179, 8, 0.35);
+    outline: 2px solid #eab308;
+    outline-offset: -2px;
+}
+
+.print-preview,
+.input-preview {
+    transform: skewX(-15deg);
+    border-color: #38bdf8;
+}
+
+.else-preview {
+    border-style: dashed;
+    border-color: #f59e0b;
 }
 
 .btn-compile {
@@ -127,6 +177,7 @@ body {
     flex: 1;
     display: flex;
     flex-direction: column;
+    overflow: hidden;
 }
 
 .panel-header {
@@ -186,6 +237,30 @@ body {
     flex-direction: column;
 }
 
+.code-editor-shell {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    background: rgba(2, 6, 23, 0.36);
+    overflow: hidden;
+}
+
+.code-line-numbers {
+    flex: 0 0 auto;
+    min-width: 3.6rem;
+    margin: 0;
+    padding: 1.5rem 0.75rem 1.5rem 0;
+    border-right: 1px solid var(--border);
+    color: #64748b;
+    text-align: right;
+    user-select: none;
+    overflow: hidden;
+    white-space: pre;
+    font-family: 'Fira Code', monospace;
+    font-size: 15px;
+    line-height: 1.6;
+}
+
 .code-area {
     flex: 1;
     background: transparent;
@@ -197,12 +272,14 @@ body {
     padding: 1.5rem;
     resize: none;
     outline: none;
+    white-space: pre;
+    overflow: auto;
 }
 
 /* Flowchart Canvas */
 .canvas-wrapper {
     flex: 1;
-    overflow: hidden;
+    overflow: auto;
     position: relative;
     background: rgba(0, 0, 0, 0.2);
     cursor: grab;
@@ -220,7 +297,9 @@ body {
     gap: 2rem;
     transform-origin: top center;
     min-height: 100%;
-    width: 100%;
+    width: max-content;
+    min-width: 100%;
+    margin: 0 auto;
     transition: transform 0.05s ease;
 }
 
@@ -316,6 +395,17 @@ body {
     min-width: 340px;
 }
 
+.flow-block.for .shape-bg {
+    /* Circle/Ellipse for FOR loop */
+    border-radius: 50px;
+    background: rgba(234, 179, 8, 0.4);
+    border: 2px solid #eab308;
+}
+.flow-block.for {
+    padding: 2.5rem 3rem;
+    min-width: 340px;
+}
+
 .flow-block.print .shape-bg,
 .flow-block.input .shape-bg {
     /* Paralelogramo */
@@ -329,6 +419,18 @@ body {
 .flow-block.input {
     padding: 1.5rem 3.5rem;
     min-width: 300px;
+}
+
+.flow-block.else .shape-bg {
+    border-radius: 8px;
+    background: rgba(245, 158, 11, 0.15);
+    border: 2px dashed #f59e0b;
+}
+
+.flow-block.end .shape-bg {
+    border-radius: 8px;
+    background: rgba(100, 116, 139, 0.4);
+    border: 2px solid #64748b;
 }
 
 .block-header {
@@ -586,4 +688,58 @@ pre {
     margin: 1rem 0 0.5rem 0;
     text-transform: uppercase;
     letter-spacing: 0.05em;
+}
+
+/* Interactive Terminal */
+.interactive-terminal {
+    height: 30%;
+    min-height: 200px;
+    background: #000;
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    font-family: 'Fira Code', monospace;
+    font-size: 13px;
+}
+
+.term-header {
+    background: #1e1e1e;
+    color: #fff;
+    padding: 5px 10px;
+    font-size: 12px;
+    font-weight: bold;
+    border-bottom: 1px solid #333;
+}
+
+.term-output {
+    flex: 1;
+    padding: 10px;
+    color: #0f0;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+.term-input-row {
+    display: flex;
+    padding: 5px 10px;
+    background: #111;
+    border-top: 1px solid #333;
+}
+
+.term-input-row .prompt {
+    color: #0f0;
+    margin-right: 8px;
+    line-height: 24px;
+}
+
+.term-input-row input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: #fff;
+    font-family: 'Fira Code', monospace;
+    font-size: 13px;
+    outline: none;
+    line-height: 24px;
 }

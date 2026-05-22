@@ -1,7 +1,7 @@
 section .data
     fmt_int db "%d", 10, 0
     fmt_scanf db "%d", 0
-    msg_4 db "Resultado de la suma:", 10, 0
+    msg_1 db "Resultado de la suma:", 10, 0
     __flt_3_14 dq 3.14  ; constante float
     __flt_2_5 dq 2.5  ; constante float
 section .bss
@@ -48,19 +48,19 @@ main:
     call suma
     add esp, 8  ; limpiar pila
     mov  dword [ebp - 36], eax  ; guardar int en pila
-    push msg_4   ; puntero al string
+    push msg_1   ; puntero al string
     call printf
     add esp, 4             ; cdecl: caller limpia
     mov eax, 0
     mov  dword [ebp - 40], eax  ; guardar int en pila
-while_ini_4:
+while_ini_1:
     mov eax, [ebp - 40]
     push   eax
     mov eax, 3
     mov    ebx, eax
     pop    eax
     cmp eax, 0
-    je  while_fin_4
+    je  while_fin_1
     mov eax, [ebp - 40]
     push   eax
     mov eax, 1
@@ -70,22 +70,23 @@ while_ini_4:
     mov  dword [ebp - 44], eax  ; guardar int en pila
     mov eax, [ebp - 44]
     mov  dword [ebp - 40], eax  ; guardar int en pila
-    jmp while_ini_4
-while_fin_4:
+    jmp while_ini_1
+while_fin_1:
     mov eax, [ebp - 36]
     push   eax
     mov eax, 10
     mov    ebx, eax
     pop    eax
     cmp eax, 0
-    je  if_else_4
+    je  if_else_1
     mov eax, 1
     mov  dword [ebp - 48], eax  ; guardar int en pila
-    jmp if_fin_4
-if_else_4:
+    jmp if_fin_1
+if_else_1:
     mov eax, 0
     mov  dword [ebp - 52], eax  ; guardar int en pila
-if_fin_4:
+if_fin_1:
+    mov eax, 0  ; valor de retorno en eax
     xor eax, eax       ; valor de retorno 0
     mov esp, ebp
     pop ebp

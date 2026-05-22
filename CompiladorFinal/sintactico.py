@@ -29,9 +29,10 @@ class Parser:
     def __init__(self, tokens):
         self.tokens     = tokens
         self.pos        = 0
-        # Tabla de tipos declarados: { nombre_var: "int" | "float" }
+        # Tabla de tipos declarados: { nombre_var: "int" | "float" | "string" }
         # El parser la construye para inyectar el tipo en NodoIdent
         self.tabla_tipos = {}
+        self.tiene_stdio = False
 
     # -----------------------------------------------------------------------
     # Utilidades de recorrido
@@ -45,9 +46,11 @@ class Parser:
         if tok and tok[0] == tipo_esperado:
             self.pos += 1
             return tok
-        raise SyntaxError(
-            f"Se esperaba '{tipo_esperado}' pero se encontró: {tok}"
-        )
+        if tok:
+            raise SyntaxError(
+                f"Línea {tok[2]}, Columna {tok[3]}: Se esperaba '{tipo_esperado}' pero se encontró '{tok[0]}': {tok[1]}"
+            )
+        raise SyntaxError(f"Se esperaba '{tipo_esperado}' pero el código terminó inesperadamente")
 
     def coincidir_numero(self):
         """Acepta INTEGER, FLOAT o NUMBER (compatibilidad con léxico viejo)."""
@@ -55,7 +58,9 @@ class Parser:
         if tok and tok[0] in ("INTEGER", "FLOAT", "NUMBER"):
             self.pos += 1
             return tok
-        raise SyntaxError(f"Se esperaba número pero se encontró: {tok}")
+        if tok:
+            raise SyntaxError(f"Línea {tok[2]}, Columna {tok[3]}: Se esperaba número pero se encontró '{tok[0]}': {tok[1]}")
+        raise SyntaxError("Se esperaba número pero el código terminó inesperadamente")
 
     def coincidir_valor(self, valor):
         """Avanza si el token actual tiene el valor indicado."""
@@ -63,7 +68,9 @@ class Parser:
         if tok and tok[1] == valor:
             self.pos += 1
             return tok
-        raise SyntaxError(f"Se esperaba '{valor}' pero se encontró: {tok}")
+        if tok:
+            raise SyntaxError(f"Línea {tok[2]}, Columna {tok[3]}: Se esperaba '{valor}' pero se encontró '{tok[1]}'")
+        raise SyntaxError(f"Se esperaba '{valor}' pero el código terminó inesperadamente")
 
     # -----------------------------------------------------------------------
     # Punto de entrada
@@ -76,12 +83,18 @@ class Parser:
         funciones  = []
         main_node  = None
         while self.obtener_token():
+            if self.obtener_token()[0] == "INCLUDE":
+                self.tiene_stdio = True
+                self.pos += 1
+                continue
             func = self.funcion()
             if func.nombre[1] == "main":
                 main_node = func
             else:
                 funciones.append(func)
-        return NodoPrograma(funciones, main_node)
+        programa = NodoPrograma(funciones, main_node)
+        programa.tiene_stdio = self.tiene_stdio
+        return programa
 
     # -----------------------------------------------------------------------
     # Función
@@ -149,7 +162,9 @@ class Parser:
         self.coincidir("OPERATOR")      # =
         expresion = self.expresion()
         self.coincidir("DELIMITER")     # ;
-        return NodoAsignacion(tipo, nombre, expresion)
+        nodo = NodoAsignacion(tipo, nombre, expresion)
+        nodo.es_declaracion = True
+        return nodo
 
     def reasignacion(self):
         """Reasignación sin declaración de tipo: variable = expresion;"""
@@ -160,7 +175,9 @@ class Parser:
         self.coincidir("OPERATOR")      # =
         expresion = self.expresion()
         self.coincidir("DELIMITER")     # ;
-        return NodoAsignacion(tipo_sintetico, nombre, expresion)
+        nodo = NodoAsignacion(tipo_sintetico, nombre, expresion)
+        nodo.es_declaracion = False
+        return nodo
 
     def retorno(self):
         self.coincidir("KEYWORD")       # return
@@ -182,10 +199,6 @@ class Parser:
         self.coincidir("DELIMITER")           # ;
         return NodoInstruccion(keyword, [" ".join(contenido)])
 
-    # --- print("texto"); / println("texto"); ---
-    # Soporta dos variantes:
-    #   1. El léxico ya capturó STRING completo: println("hola")
-    #   2. Legado con comilla como DELIMITER: println('hola')
     def instruccion_print(self):
         keyword = self.coincidir("KEYWORD")   # print / println
         self.coincidir("DELIMITER")           # (
@@ -196,6 +209,14 @@ class Parser:
             texto = self.coincidir("STRING")[1].strip('"').strip("'")
             self.coincidir("DELIMITER")       # )
             self.coincidir("DELIMITER")       # ;
+            return NodoPrint(keyword, [texto])
+        elif tok and tok[0] == "IDENTIFIER":
+            # Soporte para imprimir variables (nuevo)
+            ident = self.coincidir("IDENTIFIER")
+            self.coincidir("DELIMITER")       # )
+            self.coincidir("DELIMITER")       # ;
+            tipo_conocido = self.tabla_tipos.get(ident[1], None)
+            return NodoImprimir(keyword, [NodoIdent(ident, tipo=tipo_conocido)])
         else:
             # Variante legado: comilla como DELIMITER, recolectar hasta cierre
             delim_ap = self.coincidir("DELIMITER")
@@ -208,8 +229,7 @@ class Parser:
             self.coincidir("DELIMITER")       # )
             self.coincidir("DELIMITER")       # ;
             texto = " ".join(contenido)
-
-        return NodoPrint(keyword, [texto])
+            return NodoPrint(keyword, [texto])
 
     # --- printf(expr); / puts(expr); (estilo inge) ---
     def instruccion_printf(self):
@@ -339,7 +359,7 @@ class Parser:
             tipo_conocido = self.tabla_tipos.get(ident[1], None)
             return NodoIdent(ident, tipo=tipo_conocido)
 
-        raise SyntaxError(f"Expresión no válida: {tok}")
+        raise SyntaxError(f"Línea {tok[2]}, Columna {tok[3]}: Expresión no válida: {tok[1]}")
 
     def _argumentos(self):
         """Lista de argumentos en una llamada a función."""
@@ -357,7 +377,7 @@ class Parser:
                 tipo_conocido = self.tabla_tipos.get(ident[1], None)
                 args.append(NodoIdent(ident, tipo=tipo_conocido))
             else:
-                raise SyntaxError(f"Argumento no válido: {tok}")
+                raise SyntaxError(f"Línea {tok[2]}, Columna {tok[3]}: Argumento no válido: {tok[1]}")
             if self.obtener_token() and self.obtener_token()[1] == ",":
                 self.coincidir("DELIMITER")
             else:
@@ -449,7 +469,7 @@ def imprimir_ast(nodo):
     if isinstance(nodo, NodoIncremento):
         return {"tipo": "incremento", "variable": nodo.nombre[1], "op": nodo.operador[1]}
     if isinstance(nodo, NodoEntrada):
-        return {"tipo": "scanf", "variable": nodo.variable[1]}
+        return {"tipo": nodo.tipo[1], "variable": nodo.variable[1]}
     return None
 
 

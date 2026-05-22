@@ -26,6 +26,7 @@ import json
 import io
 import subprocess
 import os
+import shutil
 
 from lexico    import identificar_tokens
 from sintactico import Parser, imprimir_ast
@@ -163,39 +164,53 @@ def imprimir_tabla_simbolos(tabla):
 # COMPILACIÓN  (nasm + gcc con libc para printf)
 # ===========================================================================
 
-def compilar_asm(archivo_asm):
+def compilar_asm(asm_path):
     """
-    Ensambla con NASM y enlaza con GCC (libc, 32 bits).
+    Ensambla con NASM y enlaza con GCC usando Win64 en Windows y ELF32 fuera de Windows.
     Retorna (exito: bool, log: str).
     """
-    log   = []
-    nombre = archivo_asm.replace(".asm", "")
-    obj    = nombre + ".o"
-
+    log = []
     try:
-        cmd_nasm = f"nasm -f elf32 {archivo_asm} -o {obj}"
-        res_nasm = subprocess.run(cmd_nasm, capture_output=True, text=True, shell=True)
-        log.append(f"[NASM] returncode={res_nasm.returncode}")
+        if not shutil.which("nasm"):
+            return False, "[NASM ERROR] No se encontro 'nasm' en el PATH. Instala NASM o agrega nasm.exe al PATH para generar el ejecutable."
+        if not shutil.which("gcc"):
+            return False, "[GCC ERROR] No se encontro 'gcc' en el PATH. Se requiere GCC para enlazar el objeto generado por NASM."
+
+        asm_path = os.path.abspath(asm_path)
+        out_dir = os.path.dirname(asm_path)
+        asm_name = os.path.basename(asm_path)
+        base_name = os.path.splitext(asm_name)[0]
+        obj_name = f"{base_name}.o"
+        exe_name = f"{base_name}.exe" if os.name == "nt" else base_name
+        executable_path = os.path.join(out_dir, exe_name)
+        # Asumimos ELF32 para NASM (Linux) pero en Windows se suele usar -f win32 o -f elf
+        # Ojo: si estás en Windows, MinGW puede enlazar -f elf32 sin problema.
+        nasm_format = "win64" if os.name == "nt" else "elf32"
+        nasm_cmd = ["nasm", "-f", nasm_format, asm_name, "-o", obj_name]
+        res_nasm = subprocess.run(nasm_cmd, capture_output=True, text=True, cwd=out_dir)
+        log.append(f"[NASM] {' '.join(nasm_cmd)}")
+        log.append(f"[NASM] Codigo de salida: {res_nasm.returncode}")
         if res_nasm.stdout: log.append(res_nasm.stdout)
         if res_nasm.stderr: log.append(res_nasm.stderr)
+        
         if res_nasm.returncode != 0:
             return False, "\n".join(log)
 
-        cmd_gcc = f"gcc -m32 -no-pie {obj} -o {nombre}"
-        res_gcc = subprocess.run(cmd_gcc, capture_output=True, text=True, shell=True)
-        log.append(f"[GCC]  returncode={res_gcc.returncode}")
+        gcc_cmd = ["gcc", obj_name, "-o", exe_name] if os.name == "nt" else ["gcc", "-m32", obj_name, "-o", exe_name]
+        res_gcc = subprocess.run(gcc_cmd, capture_output=True, text=True, cwd=out_dir)
+        log.append(f"[GCC]  {' '.join(gcc_cmd)}")
+        log.append(f"[GCC]  Codigo de salida: {res_gcc.returncode}")
         if res_gcc.stdout: log.append(res_gcc.stdout)
         if res_gcc.stderr: log.append(res_gcc.stderr)
         if res_gcc.returncode != 0:
             return False, "\n".join(log)
+        
+        log.append(f"[OK] Ejecutable generado: {executable_path}")
+        return True, "\n".join(log)
             
     except Exception as e:
         log.append(f"[ERROR COMPILACIÓN C/ASM] {e}")
         return False, "\n".join(log)
-
-    log.append(f"[OK]   Ejecutable generado: {nombre}")
-    return True, "\n".join(log)
-
 
 # ===========================================================================
 # API PRINCIPAL  (para la interfaz gráfica)
@@ -235,7 +250,7 @@ def compilar_codigo(codigo: str, archivo_asm: str = "salida.asm") -> dict:
     try:
         tokens = identificar_tokens(codigo)
         resultado["tokens"] = tokens
-        log_lines.append(f"[LÉXICO] {len(tokens)} tokens encontrados.")
+        # log_lines.append(f"[LÉXICO] {len(tokens)} tokens encontrados.")
     except Exception as e:
         log_lines.append(f"[LÉXICO ERROR] {e}")
         resultado["log"] = "\n".join(log_lines)
@@ -249,9 +264,9 @@ def compilar_codigo(codigo: str, archivo_asm: str = "salida.asm") -> dict:
         ast     = parser.parsear()
         ast_dict = imprimir_ast(ast)
         resultado["ast_json"] = ast_dict
-        log_lines.append("[SINTÁCTICO] AST construido correctamente.")
+        log_lines.append("[SINTACTICO] AST construido correctamente.")
     except SyntaxError as e:
-        log_lines.append(f"[SINTÁCTICO ERROR] {e}")
+        log_lines.append(f"[SINTACTICO ERROR] {e}")
         resultado["log"] = "\n".join(log_lines)
         return resultado
 
@@ -267,19 +282,19 @@ def compilar_codigo(codigo: str, archivo_asm: str = "salida.asm") -> dict:
         resultado["avisos"]  = [str(a) for a in avisos]
 
         if errores:
-            log_lines.append(f"[SEMÁNTICO] {len(errores)} error(es) encontrado(s).")
+            log_lines.append(f"[SEMANTICO] {len(errores)} error(es) encontrado(s).")
             for e in errores:
                 log_lines.append(str(e))
         else:
-            log_lines.append("[SEMÁNTICO] Sin errores.")
+            log_lines.append("[SEMANTICO] Sin errores.")
 
         if avisos:
-            log_lines.append(f"[SEMÁNTICO] {len(avisos)} advertencia(s).")
+            log_lines.append(f"[SEMANTICO] {len(avisos)} advertencia(s).")
             for a in avisos:
                 log_lines.append(str(a))
 
     except Exception as e:
-        log_lines.append(f"[SEMÁNTICO ERROR] {e}")
+        log_lines.append(f"[SEMANTICO ERROR] {e}")
         resultado["log"] = "\n".join(log_lines)
         return resultado
 
@@ -290,7 +305,7 @@ def compilar_codigo(codigo: str, archivo_asm: str = "salida.asm") -> dict:
         resultado["ruby"]   = ast.traducirRuby()   if hasattr(ast, "traducirRuby")   else ""
         resultado["python"] = ast.traducirPy()     if hasattr(ast, "traducirPy")     else ""
         resultado["rust"]   = ast.traducirRust()   if hasattr(ast, "traducirRust")   else ""
-        log_lines.append("[TRADUCCIONES] Ruby, Python, Rust generados.")
+        log_lines.append("[TRADUCCIONES] Ruby, Python y Rust generados.")
     except Exception as e:
         log_lines.append(f"[TRADUCCIONES ERROR] {e}")
 
@@ -302,7 +317,7 @@ def compilar_codigo(codigo: str, archivo_asm: str = "salida.asm") -> dict:
         resultado["asm"] = asm
         with open(archivo_asm, "w", encoding="utf-8") as f:
             f.write(asm)
-        log_lines.append(f"[ASM] Código ensamblador guardado en '{archivo_asm}'.")
+        log_lines.append(f"[ASM] Codigo ensamblador guardado en '{archivo_asm}'.")
     except Exception as e:
         log_lines.append(f"[ASM ERROR] {e}")
 
