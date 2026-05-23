@@ -7,6 +7,8 @@ Mantiene la estructura completa de mi compilador (RAR) con:
   - Soporte para NodoImprimir, NodoIncremento y NodoEntrada (del inge)
 """
 
+import re
+
 from node import (
     NodoPrograma, NodoFuncion, NodoParametro, NodoAsignacion,
     NodoOperacion, NodoRetorno, NodoIdent, NodoNumero, NodoString,
@@ -336,9 +338,7 @@ class AnalizadorSemantico:
             if requiere_stdio and not self.tiene_stdio:
                 self._err("FUNC_NO_DECLARADA", "Uso de funciÃ³n de I/O sin haber incluido <stdio.h>", ambito, self._get_line(inst))
             if isinstance(inst, NodoImprimir):
-                for arg in inst.argumentos:
-                    if not isinstance(arg, NodoString):
-                        self._tipo_expr(arg, ambito)
+                self._validar_imprimir(inst, ambito)
 
         elif isinstance(inst, NodoEntrada):
             if inst.tipo[1] == "scanf" and not self.tiene_stdio:
@@ -367,6 +367,32 @@ class AnalizadorSemantico:
                 inst.sim_clase = sim.clase
                 inst.offset = sim.offset
                 inst._tipo = sim.tipo
+
+    def _validar_imprimir(self, inst, ambito):
+        if inst.tipo[1] == "printf" and inst.argumentos and isinstance(inst.argumentos[0], NodoString):
+            formato = inst.argumentos[0].valor[1].strip('"').strip("'")
+            especificadores = re.findall(r"%(?:\.\d+)?[dfs]", formato)
+            valores = inst.argumentos[1:]
+            if especificadores and len(valores) != len(especificadores):
+                self._err("TIPO_INCOMPATIBLE",
+                          f"printf espera {len(especificadores)} valor(es) para el formato '{formato}'",
+                          ambito, self._get_line(inst))
+            if not especificadores and valores:
+                self._err("TIPO_INCOMPATIBLE",
+                          f"printf recibio valores, pero el formato '{formato}' no tiene %d, %f o %s",
+                          ambito, self._get_line(inst))
+            for spec, arg in zip(especificadores, valores):
+                tipo_arg = self._tipo_expr(arg, ambito)
+                esperado = "int" if spec.endswith("d") else ("float" if spec.endswith("f") else "string")
+                if tipo_arg and tipo_arg != esperado:
+                    self._err("TIPO_INCOMPATIBLE",
+                              f"printf usa {spec}, pero recibio '{tipo_arg}'",
+                              ambito, self._get_line(inst))
+            return
+
+        for arg in inst.argumentos:
+            if not isinstance(arg, NodoString):
+                self._tipo_expr(arg, ambito)
 
     # --- AsignaciÃ³n --------------------------------------------------------
 

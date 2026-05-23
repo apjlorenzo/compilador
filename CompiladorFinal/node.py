@@ -10,6 +10,7 @@
 
 import os
 import re
+import codecs
 
 
 ES_WIN64 = os.name == "nt"
@@ -563,7 +564,32 @@ class NodoString(NodoAST):
 
     def obtenerDato(self):
         texto = self.valor[1].strip('"').strip("'")
-        return f'    {self.etiqueta} db "{texto}", 0'
+        texto = codecs.decode(texto, "unicode_escape")
+        partes = []
+        actual = []
+        for ch in texto:
+            if ch == "\n":
+                if actual:
+                    partes.append('"' + "".join(actual).replace('"', '\\"') + '"')
+                    actual = []
+                partes.append("10")
+            elif ch == "\t":
+                if actual:
+                    partes.append('"' + "".join(actual).replace('"', '\\"') + '"')
+                    actual = []
+                partes.append("9")
+            elif ch == "\r":
+                if actual:
+                    partes.append('"' + "".join(actual).replace('"', '\\"') + '"')
+                    actual = []
+                partes.append("13")
+            else:
+                actual.append(ch)
+        if actual:
+            partes.append('"' + "".join(actual).replace('"', '\\"') + '"')
+        if not partes:
+            partes.append('""')
+        return f"    {self.etiqueta} db {', '.join(partes)}, 0"
 
     def traducirPy(self):
         return self.valor[1]   # ya tiene las comillas
@@ -705,9 +731,22 @@ class NodoImprimir(NodoAST):
 
     def generarCodigo(self):
         arg = self.argumentos[0] if self.argumentos else None
+        valor_arg = self.argumentos[1] if len(self.argumentos) > 1 else arg
+        formato_arg = arg if len(self.argumentos) > 1 and isinstance(arg, NodoString) else None
         codigo = []
         if ES_WIN64:
-            if isinstance(arg, NodoString):
+            if formato_arg and valor_arg:
+                codigo.append(valor_arg.generarCodigo())
+                if _es_float_expr(valor_arg):
+                    codigo.append("    fstp qword [rel __float_print_tmp]")
+                    codigo.append("    movsd xmm1, qword [rel __float_print_tmp]")
+                    codigo.append("    mov rdx, [rel __float_print_tmp]")
+                elif getattr(valor_arg, '_tipo', None) == "string":
+                    codigo.append("    mov rdx, rax")
+                else:
+                    codigo.append("    mov edx, eax")
+                codigo.append(f"    lea rcx, [rel {formato_arg.etiqueta}]")
+            elif isinstance(arg, NodoString):
                 codigo.append(f"    lea rcx, [rel {arg.etiqueta}]")
             elif arg:
                 codigo.append(arg.generarCodigo())
@@ -732,7 +771,18 @@ class NodoImprimir(NodoAST):
             codigo.append("    call fflush")
             return "\n".join(codigo)
 
-        if isinstance(arg, NodoString):
+        if formato_arg and valor_arg:
+            codigo.append(valor_arg.generarCodigo())
+            if _es_float_expr(valor_arg):
+                codigo.append("    fstp qword [__float_print_tmp]")
+                codigo.append("    push dword [__float_print_tmp + 4]")
+                codigo.append("    push dword [__float_print_tmp]")
+            else:
+                codigo.append("    push eax")
+            codigo.append(f"    push {formato_arg.etiqueta}")
+            codigo.append(f"    call printf")
+            codigo.append(f"    add esp, {12 if _es_float_expr(valor_arg) else 8}")
+        elif isinstance(arg, NodoString):
             codigo.append(f"    push {arg.etiqueta}")
             codigo.append(f"    call printf")
             codigo.append(f"    add esp, 4")

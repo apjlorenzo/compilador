@@ -17,9 +17,11 @@ main:
     push rbp
     mov rbp, rsp
     sub rsp, 48  ; locales y shadow space Win64
-    mov eax, 1
+    mov eax, 0
     mov  dword [rbp - 4], eax  ; guardar int en pila
-for_ini_1:
+    mov eax, 0
+    mov  dword [rbp - 4], eax  ; guardar int en pila
+for_ini_3:
     mov eax, [rbp - 4]
     push   rax
     mov eax, 5
@@ -29,7 +31,7 @@ for_ini_1:
     setle  al
     movzx  eax, al
     cmp eax, 0
-    je  for_fin_1
+    je  for_fin_3
     mov eax, [rbp - 4]
     mov edx, eax
     lea rcx, [rel fmt_int]
@@ -37,8 +39,8 @@ for_ini_1:
     xor ecx, ecx
     call fflush
     inc dword [rbp - 4]
-    jmp for_ini_1
-for_fin_1:
+    jmp for_ini_3
+for_fin_3:
     mov eax, 0  ; valor de retorno en eax
     mov rsp, rbp
     pop rbp

@@ -702,7 +702,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const lines = ['=== DIAGNOSTICOS ==='];
         diagnosticos.forEach((item, index) => {
             const ubicacion = item.linea
-                ? `Linea ${item.linea}${item.columna ? `, columna ${item.columna}` : ''}`
+                ? `Linea ${item.linea}`
                 : 'Sin linea';
             lines.push(`${index + 1}. ${ubicacion}: ${item.mensaje}`);
             if (item.fuente) lines.push(`   > ${item.fuente}`);

@@ -270,7 +270,7 @@ def _linea_fuente(codigo, linea):
 
 def _diagnostico(codigo, fase, mensaje, severidad="error", linea=None, columna=None):
     if linea is None or columna is None:
-        match = re.search(r"L[ií]nea\s+(\d+)(?:,\s*Columna\s+(\d+))?", str(mensaje))
+        match = re.search(r"L(?:i|í|Ã­)nea\s+(\d+)(?:,\s*Columna\s+(\d+))?", str(mensaje))
         if match:
             linea = linea or int(match.group(1))
             columna = columna or (int(match.group(2)) if match.group(2) else None)

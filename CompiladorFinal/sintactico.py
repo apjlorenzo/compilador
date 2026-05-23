@@ -48,9 +48,21 @@ class Parser:
             return tok
         if tok:
             raise SyntaxError(
-                f"LÃ­nea {tok[2]}, Columna {tok[3]}: Se esperaba '{tipo_esperado}' pero se encontrÃ³ '{tok[0]}': {tok[1]}"
+                f"Linea {tok[2]}: se esperaba {self._nombre_tipo(tipo_esperado)}, pero se encontro '{tok[1]}'"
             )
-        raise SyntaxError(f"Se esperaba '{tipo_esperado}' pero el cÃ³digo terminÃ³ inesperadamente")
+        raise SyntaxError(f"El codigo termino inesperadamente. Se esperaba {self._nombre_tipo(tipo_esperado)}")
+
+    def _nombre_tipo(self, tipo):
+        return {
+            "KEYWORD": "una palabra reservada como int, float, while o for",
+            "IDENTIFIER": "un identificador de variable",
+            "OPERATOR": "un operador",
+            "DELIMITER": "un simbolo como (, ), {, } o ;",
+            "STRING": "una cadena de texto",
+            "INTEGER": "un numero entero",
+            "FLOAT": "un numero decimal",
+            "NUMBER": "un numero",
+        }.get(tipo, tipo)
 
     def coincidir_numero(self):
         """Acepta INTEGER, FLOAT o NUMBER (compatibilidad con lÃ©xico viejo)."""
@@ -59,8 +71,8 @@ class Parser:
             self.pos += 1
             return tok
         if tok:
-            raise SyntaxError(f"LÃ­nea {tok[2]}, Columna {tok[3]}: Se esperaba nÃºmero pero se encontrÃ³ '{tok[0]}': {tok[1]}")
-        raise SyntaxError("Se esperaba nÃºmero pero el cÃ³digo terminÃ³ inesperadamente")
+            raise SyntaxError(f"Linea {tok[2]}: se esperaba un numero, pero se encontro '{tok[1]}'")
+        raise SyntaxError("El codigo termino inesperadamente. Se esperaba un numero")
 
     def coincidir_valor(self, valor):
         """Avanza si el token actual tiene el valor indicado."""
@@ -72,11 +84,11 @@ class Parser:
         if tok and valor == ";" and previo and previo[2] < tok[2]:
             columna = previo[3] + len(str(previo[1]))
             raise SyntaxError(
-                f"LÃ­nea {previo[2]}, Columna {columna}: Se esperaba ';' al final de la instrucciÃ³n"
+                f"Linea {previo[2]}: falta ';' al final de la instruccion"
             )
         if tok:
-            raise SyntaxError(f"LÃ­nea {tok[2]}, Columna {tok[3]}: Se esperaba '{valor}' pero se encontrÃ³ '{tok[1]}'")
-        raise SyntaxError(f"Se esperaba '{valor}' pero el cÃ³digo terminÃ³ inesperadamente")
+            raise SyntaxError(f"Linea {tok[2]}: se esperaba '{valor}', pero se encontro '{tok[1]}'")
+        raise SyntaxError(f"El codigo termino inesperadamente. Se esperaba '{valor}'")
 
     # -----------------------------------------------------------------------
     # Punto de entrada
@@ -157,6 +169,8 @@ class Parser:
                 sig = self.tokens[self.pos + 1] if self.pos + 1 < len(self.tokens) else None
                 if sig and sig[0] == "OPERATOR" and sig[1] in ("++", "--"):
                     instrucciones.append(self.instruccion_incremento())
+                elif sig and sig[0] == "OPERATOR" and sig[1] in ("+", "-"):
+                    raise SyntaxError(f"Linea {tok[2]}: incremento incompleto. Usa {tok[1]}++ o {tok[1]}--")
                 else:
                     instrucciones.append(self.reasignacion())
             else:                              instrucciones.append(self.asignacion())
@@ -170,12 +184,22 @@ class Parser:
         tipo   = self.coincidir("KEYWORD")
         nombre = self.coincidir("IDENTIFIER")
         self.tabla_tipos[nombre[1]] = tipo[1]
-        self.coincidir_valor("=")
-        expresion = self.expresion()
+        if self.obtener_token() and self.obtener_token()[1] == ";":
+            expresion = self._valor_default(tipo, nombre)
+        else:
+            self.coincidir_valor("=")
+            expresion = self.expresion()
         self.coincidir_valor(";")
         nodo = NodoAsignacion(tipo, nombre, expresion)
         nodo.es_declaracion = True
         return nodo
+
+    def _valor_default(self, tipo, nombre):
+        if tipo[1] == "float":
+            return NodoNumero(("FLOAT", "0.0", nombre[2], nombre[3]))
+        if tipo[1] == "string":
+            return NodoString(("STRING", '""', nombre[2], nombre[3]))
+        return NodoNumero(("INTEGER", "0", nombre[2], nombre[3]))
 
     def reasignacion(self):
         """ReasignaciÃ³n sin declaraciÃ³n de tipo: variable = expresion;"""
@@ -251,10 +275,13 @@ class Parser:
     def instruccion_printf(self):
         keyword = self.coincidir("KEYWORD")   # printf / puts
         self.coincidir_valor("(")
-        arg = self.expresion()                # NodoString o expresion
+        argumentos = [self.expresion()]       # printf(expr) o printf("%d", expr)
+        if self.obtener_token() and self.obtener_token()[1] == ",":
+            self.coincidir_valor(",")
+            argumentos.append(self.expresion())
         self.coincidir_valor(")")
         self.coincidir_valor(";")
-        return NodoImprimir(keyword, [arg])
+        return NodoImprimir(keyword, argumentos)
 
     # --- scanf("%d", variable); ---
     def instruccion_scanf(self):
@@ -271,6 +298,9 @@ class Parser:
     def instruccion_while(self):
         self.coincidir("KEYWORD")             # while
         self.coincidir_valor("(")
+        if self.obtener_token() and self.obtener_token()[1] == ")":
+            tok = self.obtener_token()
+            raise SyntaxError(f"Linea {tok[2]}: while necesita una condicion, por ejemplo while (i <= 5)")
         condicion = self.expresion()
         self.coincidir_valor(")")
         self.coincidir_valor("{")
@@ -281,44 +311,51 @@ class Parser:
     # --- for (tipo var = expr; cond; var++ / var--) { cuerpo } ---
     def instruccion_for(self):
         self.coincidir("KEYWORD")             # for
-        self.coincidir("DELIMITER")           # (
-        # InicializaciÃ³n: tipo var = expr;
-        tipo_init   = self.coincidir("KEYWORD")
-        nombre_init = self.coincidir("IDENTIFIER")
-        self.tabla_tipos[nombre_init[1]] = tipo_init[1]
-        self.coincidir_valor("=")
-        expr_init   = self.expresion()
-        self.coincidir_valor(";")
-        inicio = NodoAsignacion(tipo_init, nombre_init, expr_init)
-        # CondiciÃ³n
+        self.coincidir_valor("(")
+
+        tok = self.obtener_token()
+        if not tok:
+            raise SyntaxError("El codigo termino inesperadamente dentro del for")
+        if tok[1] == ";":
+            raise SyntaxError(f"Linea {tok[2]}: for necesita inicializacion, por ejemplo int i = 0 o i = 0")
+        if tok[0] == "KEYWORD":
+            inicio = self.asignacion()
+        elif tok[0] == "IDENTIFIER":
+            inicio = self.reasignacion()
+        else:
+            raise SyntaxError(f"Linea {tok[2]}: inicializacion invalida en for. Usa int i = 0 o i = 0")
+
+        if self.obtener_token() and self.obtener_token()[1] == ";":
+            tok = self.obtener_token()
+            raise SyntaxError(f"Linea {tok[2]}: for necesita una condicion, por ejemplo i <= 10")
         condicion = self.expresion()
         self.coincidir_valor(";")
-        # Incremento: var++ o var-- (estilo inge) o expresiÃ³n legado
-        tok = self.obtener_token()
-        if tok and tok[0] == "IDENTIFIER":
-            nombre_inc = self.coincidir("IDENTIFIER")
-            op_tok     = self.obtener_token()
-            if op_tok and op_tok[1] in ("++", "--"):
-                self.coincidir("OPERATOR")
-                incremento = NodoIncremento(nombre_inc, op_tok)
-            else:
-                # Legado: recolectar hasta ')'
-                partes = [nombre_inc[1]]
-                while self.obtener_token() and self.obtener_token()[1] != ")":
-                    partes.append(self.obtener_token()[1])
-                    self.pos += 1
-                incremento = " ".join(partes)
-        else:
-            partes = []
-            while self.obtener_token() and self.obtener_token()[1] != ")":
-                partes.append(self.obtener_token()[1])
-                self.pos += 1
-            incremento = " ".join(partes)
+
+        incremento = self._incremento_for()
         self.coincidir_valor(")")
         self.coincidir_valor("{")
         cuerpo = self.cuerpo()
         self.coincidir_valor("}")
         return NodoFor(inicio, condicion, incremento, cuerpo)
+
+    def _incremento_for(self):
+        tok = self.obtener_token()
+        if not tok:
+            raise SyntaxError("El codigo termino inesperadamente en el incremento del for")
+        if tok[1] == ")":
+            raise SyntaxError(f"Linea {tok[2]}: for necesita incremento, por ejemplo i++ o i--")
+        if tok[0] != "IDENTIFIER":
+            raise SyntaxError(f"Linea {tok[2]}: incremento invalido en for. Usa i++ o i--")
+        nombre_inc = self.coincidir("IDENTIFIER")
+        op_tok = self.obtener_token()
+        if not op_tok or op_tok[0] != "OPERATOR":
+            raise SyntaxError(f"Linea {nombre_inc[2]}: incremento invalido. Usa {nombre_inc[1]}++ o {nombre_inc[1]}--")
+        if op_tok[1] in ("++", "--"):
+            self.coincidir("OPERATOR")
+            return NodoIncremento(nombre_inc, op_tok)
+        if op_tok[1] in ("+", "-"):
+            raise SyntaxError(f"Linea {op_tok[2]}: incremento incompleto. Usa {nombre_inc[1]}++ o {nombre_inc[1]}--")
+        raise SyntaxError(f"Linea {op_tok[2]}: incremento invalido. Usa {nombre_inc[1]}++ o {nombre_inc[1]}--")
 
     # --- if (cond) { ... } [else { ... }] ---
     def instruccion_if(self):
