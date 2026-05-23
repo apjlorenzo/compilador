@@ -27,6 +27,7 @@ import io
 import subprocess
 import os
 import shutil
+import re
 
 from lexico    import identificar_tokens
 from sintactico import Parser, imprimir_ast
@@ -35,6 +36,50 @@ from node import (
     NodoAsignacion, NodoPrint, NodoImprimir, NodoWhile, NodoFor, NodoIf,
     NodoLlamadaFuncion, NodoRetorno,
 )
+
+
+def optimizar_ast(ast):
+    """Aplica optimizaciones locales al AST y devuelve cuantas expresiones cambio."""
+    cambios = 0
+
+    def opt_expr(expr):
+        nonlocal cambios
+        if hasattr(expr, "optimizar"):
+            nuevo = expr.optimizar()
+            if nuevo is not expr:
+                cambios += 1
+            return nuevo
+        return expr
+
+    def opt_bloque(instrucciones):
+        for inst in instrucciones or []:
+            if hasattr(inst, "expresion"):
+                inst.expresion = opt_expr(inst.expresion)
+            if isinstance(inst, NodoRetorno):
+                inst.expresion = opt_expr(inst.expresion)
+            if isinstance(inst, NodoImprimir):
+                inst.argumentos = [opt_expr(arg) for arg in inst.argumentos]
+            if isinstance(inst, (NodoWhile, NodoIf)) and hasattr(inst, "condicion"):
+                inst.condicion = opt_expr(inst.condicion)
+            if isinstance(inst, NodoFor):
+                if hasattr(inst, "inicio") and isinstance(inst.inicio, NodoAsignacion):
+                    inst.inicio.expresion = opt_expr(inst.inicio.expresion)
+                if hasattr(inst, "condicion"):
+                    inst.condicion = opt_expr(inst.condicion)
+                if hasattr(inst, "incremento") and hasattr(inst.incremento, "expresion"):
+                    inst.incremento.expresion = opt_expr(inst.incremento.expresion)
+            if hasattr(inst, "cuerpo"):
+                opt_bloque(inst.cuerpo)
+            if hasattr(inst, "cuerpo_if"):
+                opt_bloque(inst.cuerpo_if)
+            if hasattr(inst, "cuerpo_else"):
+                opt_bloque(inst.cuerpo_else)
+
+    for funcion in getattr(ast, "funciones", []):
+        opt_bloque(funcion.cuerpo)
+    if getattr(ast, "main", None):
+        opt_bloque(ast.main.cuerpo)
+    return cambios
 
 
 # ===========================================================================
@@ -216,7 +261,47 @@ def compilar_asm(asm_path):
 # API PRINCIPAL  (para la interfaz gráfica)
 # ===========================================================================
 
-def compilar_codigo(codigo: str, archivo_asm: str = "salida.asm") -> dict:
+def _linea_fuente(codigo, linea):
+    if not isinstance(linea, int) or linea < 1:
+        return ""
+    lineas = codigo.splitlines()
+    return lineas[linea - 1].strip() if linea <= len(lineas) else ""
+
+
+def _diagnostico(codigo, fase, mensaje, severidad="error", linea=None, columna=None):
+    if linea is None or columna is None:
+        match = re.search(r"L[ií]nea\s+(\d+)(?:,\s*Columna\s+(\d+))?", str(mensaje))
+        if match:
+            linea = linea or int(match.group(1))
+            columna = columna or (int(match.group(2)) if match.group(2) else None)
+    return {
+        "fase": fase,
+        "severidad": severidad,
+        "linea": linea,
+        "columna": columna,
+        "mensaje": str(mensaje).strip(),
+        "fuente": _linea_fuente(codigo, linea),
+    }
+
+
+def _diagnostico_semantico(codigo, item, severidad):
+    linea = item.linea if isinstance(item.linea, int) else None
+    etiquetas_claras = {
+        "DIVISION_CERO": "Division por cero",
+        "VAR_NO_DECLARADA": "Variable no declarada",
+        "VAR_YA_DECLARADA": "Variable ya declarada",
+        "TIPO_INCOMPATIBLE": "Tipo incompatible",
+        "FUNC_NO_DECLARADA": "Funcion no declarada",
+        "FUNC_YA_DECLARADA": "Funcion ya declarada",
+        "RETORNO_TIPO": "Retorno incompatible",
+        "VAR_NO_USADA": "Variable no usada",
+    }
+    etiqueta = etiquetas_claras.get(getattr(item, "codigo", ""), "")
+    mensaje = f"{etiqueta}: {item.mensaje}" if etiqueta else item.mensaje
+    return _diagnostico(codigo, "semantico", mensaje, severidad, linea)
+
+
+def compilar_codigo(codigo: str, archivo_asm: str = "salida.asm", nombre_programa: str = None) -> dict:
     """
     Ejecuta todas las fases del compilador sobre *codigo* y devuelve
     un diccionario con los resultados de cada fase.
@@ -236,6 +321,7 @@ def compilar_codigo(codigo: str, archivo_asm: str = "salida.asm") -> dict:
         "tabla"   : None,
         "errores" : [],
         "avisos"  : [],
+        "diagnosticos": [],
         "ruby"    : "",
         "python"  : "",
         "rust"    : "",
@@ -253,6 +339,8 @@ def compilar_codigo(codigo: str, archivo_asm: str = "salida.asm") -> dict:
         # log_lines.append(f"[LÉXICO] {len(tokens)} tokens encontrados.")
     except Exception as e:
         log_lines.append(f"[LÉXICO ERROR] {e}")
+        resultado["errores"].append(str(e))
+        resultado["diagnosticos"].append(_diagnostico(codigo, "lexico", e))
         resultado["log"] = "\n".join(log_lines)
         return resultado
 
@@ -262,11 +350,16 @@ def compilar_codigo(codigo: str, archivo_asm: str = "salida.asm") -> dict:
     try:
         parser  = Parser(tokens)
         ast     = parser.parsear()
+        ast.nombre_programa = nombre_programa or os.path.splitext(os.path.basename(archivo_asm))[0]
+        if ast.main is None:
+            raise SyntaxError("El programa debe declarar la funcion principal 'int main() { ... }'")
         ast_dict = imprimir_ast(ast)
         resultado["ast_json"] = ast_dict
         log_lines.append("[SINTACTICO] AST construido correctamente.")
     except SyntaxError as e:
         log_lines.append(f"[SINTACTICO ERROR] {e}")
+        resultado["errores"].append(str(e))
+        resultado["diagnosticos"].append(_diagnostico(codigo, "sintactico", e))
         resultado["log"] = "\n".join(log_lines)
         return resultado
 
@@ -280,6 +373,10 @@ def compilar_codigo(codigo: str, archivo_asm: str = "salida.asm") -> dict:
         resultado["tabla"]   = tabla_sem.como_dict()
         resultado["errores"] = [str(e) for e in errores]
         resultado["avisos"]  = [str(a) for a in avisos]
+        resultado["diagnosticos"] = (
+            [_diagnostico_semantico(codigo, e, "error") for e in errores]
+            + [_diagnostico_semantico(codigo, a, "aviso") for a in avisos]
+        )
 
         if errores:
             log_lines.append(f"[SEMANTICO] {len(errores)} error(es) encontrado(s).")
@@ -293,13 +390,37 @@ def compilar_codigo(codigo: str, archivo_asm: str = "salida.asm") -> dict:
             for a in avisos:
                 log_lines.append(str(a))
 
+        if errores:
+            resultado["log"] = "\n".join(log_lines)
+            return resultado
+
     except Exception as e:
         log_lines.append(f"[SEMANTICO ERROR] {e}")
+        resultado["errores"].append(str(e))
+        resultado["diagnosticos"].append(_diagnostico(codigo, "semantico", e))
         resultado["log"] = "\n".join(log_lines)
         return resultado
 
     # ------------------------------------------------------------------
-    # FASE 4: Traducciones
+    # FASE 4: Optimizacion del AST
+    # ------------------------------------------------------------------
+    try:
+        cambios_opt = optimizar_ast(ast)
+        if cambios_opt:
+            resultado["ast_json"] = imprimir_ast(ast)
+            log_lines.append(f"[OPTIMIZACION] {cambios_opt} expresion(es) simplificada(s).")
+        else:
+            log_lines.append("[OPTIMIZACION] No se encontraron simplificaciones aplicables.")
+    except Exception as e:
+        mensaje = f"No se pudo optimizar el programa: {e}"
+        log_lines.append(f"[OPTIMIZACION ERROR] {e}")
+        resultado["errores"].append(mensaje)
+        resultado["diagnosticos"].append(_diagnostico(codigo, "optimizacion", mensaje))
+        resultado["log"] = "\n".join(log_lines)
+        return resultado
+
+    # ------------------------------------------------------------------
+    # FASE 5: Traducciones
     # ------------------------------------------------------------------
     try:
         resultado["ruby"]   = ast.traducirRuby()   if hasattr(ast, "traducirRuby")   else ""
@@ -320,8 +441,10 @@ def compilar_codigo(codigo: str, archivo_asm: str = "salida.asm") -> dict:
         log_lines.append(f"[ASM] Codigo ensamblador guardado en '{archivo_asm}'.")
     except Exception as e:
         log_lines.append(f"[ASM ERROR] {e}")
+        resultado["errores"].append(str(e))
+        resultado["diagnosticos"].append(_diagnostico(codigo, "asm", f"No se pudo generar assembler: {e}"))
 
-    resultado["ok"]  = len(errores) == 0
+    resultado["ok"]  = len(resultado["errores"]) == 0
     resultado["log"] = "\n".join(log_lines)
     return resultado
 

@@ -6,6 +6,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const lineNumbers = document.getElementById('code-line-numbers');
     let draggedType = null;
 
+    const saveSourceButton = document.getElementById('btn-save');
+    if (saveSourceButton) {
+        saveSourceButton.textContent = 'Guardar Codigo';
+        saveSourceButton.title = 'Guardar codigo fuente';
+    }
+
     const updateLineNumbers = () => {
         if (!editor || !lineNumbers) return;
         const count = Math.max(1, editor.value.split('\n').length);
@@ -16,6 +22,30 @@ document.addEventListener('DOMContentLoaded', () => {
     editor?.addEventListener('input', updateLineNumbers);
     editor?.addEventListener('scroll', () => {
         if (lineNumbers) lineNumbers.scrollTop = editor.scrollTop;
+    });
+
+    const insertEditorText = (text) => {
+        const start = editor.selectionStart;
+        const end = editor.selectionEnd;
+        editor.value = editor.value.slice(0, start) + text + editor.value.slice(end);
+        editor.selectionStart = editor.selectionEnd = start + text.length;
+        updateLineNumbers();
+    };
+
+    editor?.addEventListener('keydown', (e) => {
+        if (e.key === 'Tab') {
+            e.preventDefault();
+            insertEditorText('    ');
+            return;
+        }
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            const beforeCursor = editor.value.slice(0, editor.selectionStart);
+            const currentLine = beforeCursor.split('\n').pop() || '';
+            const baseIndent = (currentLine.match(/^\s*/) || [''])[0];
+            const extraIndent = /\{\s*$/.test(currentLine) ? '    ' : '';
+            insertEditorText('\n' + baseIndent + extraIndent);
+        }
     });
 
     document.querySelectorAll('.tool-btn').forEach(btn => {
@@ -114,6 +144,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const reader = new FileReader();
         reader.onload = (ev) => {
             editor.value = ev.target.result;
+            document.getElementById('out-filename').value = file.name.replace(/\.c$/i, '');
             updateLineNumbers();
             document.querySelector('[data-view="code"]').click(); // switch to code view
         };
@@ -132,7 +163,17 @@ document.addEventListener('DOMContentLoaded', () => {
         zoomLevel = 1; translateX = 0; translateY = 0; updateTransform();
     });
 
-    document.getElementById('btn-save')?.addEventListener('click', () => {
+    document.getElementById('btn-save')?.addEventListener('click', (event) => {
+        event.stopImmediatePropagation();
+        const blob = new Blob([editor.value], { type: 'text/x-csrc' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const filename = (document.getElementById('out-filename').value || 'noname').replace(/\.c$/i, '');
+        a.download = filename + '.c';
+        a.click();
+        URL.revokeObjectURL(url);
+        /*
         let content = "=== RESULTADOS DE COMPILACIÓN ===\n\n";
         content += "[ASM]\n" + document.getElementById('out-asm').textContent + "\n\n";
         content += "[AST]\n" + document.getElementById('out-ast').textContent + "\n\n";
@@ -145,6 +186,7 @@ document.addEventListener('DOMContentLoaded', () => {
         a.download = (document.getElementById('out-filename').value || 'noname') + '_resultados.txt';
         a.click();
         URL.revokeObjectURL(url);
+        */
     });
 
     // Interactive Terminal
@@ -605,7 +647,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 document.getElementById('term-output').textContent = result.ok
                     ? 'Compilacion finalizada, pero no se recibio ruta de ejecutable.'
-                    : 'No se ejecuto porque la compilacion termino con errores. Revisa ECHO (Log).';
+                    : buildUserDiagnostics(result);
             }
             
         } catch (error) {
@@ -625,9 +667,8 @@ document.addEventListener('DOMContentLoaded', () => {
         lines.push(`Estado: ${result.ok ? 'Correcta' : 'Con errores'}`);
         lines.push('');
 
-        if (result.errores?.length) {
-            lines.push(`Errores (${result.errores.length}):`);
-            result.errores.forEach((error, index) => lines.push(`${index + 1}. ${error}`));
+        if (result.diagnosticos?.length) {
+            lines.push(buildUserDiagnostics(result));
             lines.push('');
         } else {
             lines.push('Errores: ninguno');
@@ -647,6 +688,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
         lines.push('=== FASES / NASM ===');
         lines.push(result.log || 'Sin mensajes de compilacion.');
+        return lines.join('\n');
+    }
+
+    function buildUserDiagnostics(result) {
+        const diagnosticos = result.diagnosticos || [];
+        if (!diagnosticos.length) {
+            return (result.errores || []).length
+                ? `Errores:\n${result.errores.join('\n')}`
+                : 'No hay diagnosticos para mostrar.';
+        }
+
+        const lines = ['=== DIAGNOSTICOS ==='];
+        diagnosticos.forEach((item, index) => {
+            const ubicacion = item.linea
+                ? `Linea ${item.linea}${item.columna ? `, columna ${item.columna}` : ''}`
+                : 'Sin linea';
+            lines.push(`${index + 1}. ${ubicacion}: ${item.mensaje}`);
+            if (item.fuente) lines.push(`   > ${item.fuente}`);
+        });
         return lines.join('\n');
     }
 });

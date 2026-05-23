@@ -93,7 +93,7 @@ class CompilerHandler(http.server.SimpleHTTPRequestHandler):
                 asm_path = os.path.join(out_dir, f"{filename}.asm")
                 
                 # Compilar a ASM usando nuestro main.py
-                resultado = compilar_codigo(codigo, asm_path)
+                resultado = compilar_codigo(codigo, asm_path, filename)
                 
                 if resultado["ok"]:
                     # Generar el ejecutable NASM
@@ -115,6 +115,14 @@ class CompilerHandler(http.server.SimpleHTTPRequestHandler):
                     else:
                         resultado["ok"] = False
                         resultado.setdefault("errores", []).append("No se pudo generar el ejecutable con NASM/GCC. Revisa el log de compilacion.")
+                        resultado.setdefault("diagnosticos", []).append({
+                            "fase": "enlace",
+                            "severidad": "error",
+                            "linea": None,
+                            "columna": None,
+                            "mensaje": "No se pudo generar el ejecutable. Revisa la seccion tecnica NASM/GCC del log.",
+                            "fuente": "",
+                        })
                 
                 self.send_response(200)
                 self.send_header('Content-type', 'application/json')

@@ -19,6 +19,31 @@ def _base_pila():
     return "rbp" if ES_WIN64 else "ebp"
 
 
+def _es_float_expr(nodo):
+    return hasattr(nodo, "es_float") and callable(nodo.es_float) and nodo.es_float()
+
+
+def _generar_float_operand(nodo):
+    codigo = nodo.generarCodigo()
+    if _es_float_expr(nodo):
+        return codigo
+    if ES_WIN64:
+        return "\n".join([
+            codigo,
+            "    sub rsp, 8",
+            "    mov dword [rsp], eax",
+            "    fild dword [rsp]",
+            "    add rsp, 8",
+        ])
+    return "\n".join([
+        codigo,
+        "    sub esp, 4",
+        "    mov dword [esp], eax",
+        "    fild dword [esp]",
+        "    add esp, 4",
+    ])
+
+
 class NodoAST:
     """Clase base de todos los nodos del AST."""
     pass
@@ -40,11 +65,14 @@ class NodoPrograma(NodoAST):
         data_text = [
             "section .data",
             '    fmt_int db "%d", 10, 0',
+            '    fmt_float db "%f", 10, 0',
             '    fmt_str db "%s", 10, 0',
             '    fmt_scanf db "%d", 0',
+            '    msg_div_zero db "Error de ejecucion: division por cero", 10, 0',
+            '    __flt_zero dq 0.0',
             '    fmt_nl db 10, 0'
         ]
-        data_bss  = ["section .bss"]
+        data_bss  = ["section .bss", "    __float_print_tmp resq 1"]
         codigo    = ["extern printf", "extern scanf", "extern fflush", "section .text", "global main"]
         float_consts_vistas = set()
 
@@ -210,7 +238,8 @@ class NodoAsignacion(NodoAST):
         return self.tipo[1] == "string"
 
     def generarCodigo(self):
-        codigo = self.expresion.generarCodigo()
+        expr_float = _es_float_expr(self.expresion)
+        codigo = _generar_float_operand(self.expresion) if self.es_float() else self.expresion.generarCodigo()
         if hasattr(self, 'offset') and self.offset is not None:
             sign = "+" if self.offset > 0 else "-"
             op_str = f"{_base_pila()} {sign} {abs(self.offset)}"
@@ -220,6 +249,8 @@ class NodoAsignacion(NodoAST):
                 tam = "qword" if ES_WIN64 else "dword"
                 reg = "rax" if ES_WIN64 else "eax"
                 codigo += f"\n    mov  {tam} [{op_str}], {reg}  ; guardar puntero string en pila"
+            elif expr_float:
+                codigo += f"\n    fistp dword [{op_str}]  ; convertir float a int"
             else:
                 codigo += f"\n    mov  dword [{op_str}], eax  ; guardar int en pila"
         else:
@@ -229,6 +260,8 @@ class NodoAsignacion(NodoAST):
                 tam = "qword" if ES_WIN64 else "dword"
                 reg = "rax" if ES_WIN64 else "eax"
                 codigo += f"\n    mov  {tam} [{self.nombre[1]}], {reg}  ; guardar puntero string"
+            elif expr_float:
+                codigo += f"\n    fistp dword [{self.nombre[1]}]  ; convertir float a int"
             else:
                 codigo += f"\n    mov  dword [{self.nombre[1]}], eax  ; guardar int en variable"
         return codigo
@@ -248,10 +281,17 @@ class NodoAsignacion(NodoAST):
 # ---------------------------------------------------------------------------
 
 class NodoOperacion(NodoAST):
+    _div_guard_counter = 0
+
     def __init__(self, izquierda, operador, derecha):
         self.izquierda = izquierda
         self.derecha   = derecha
         self.operador  = operador   # token OPERATOR
+
+    @classmethod
+    def _nuevo_div_guard(cls):
+        cls._div_guard_counter += 1
+        return f"div_ok_{cls._div_guard_counter}", f"div_zero_{cls._div_guard_counter}", f"div_fin_{cls._div_guard_counter}"
 
     def es_float(self):
         if self.operador[1] in ("<", ">", "<=", ">=", "==", "!="):
@@ -267,6 +307,22 @@ class NodoOperacion(NodoAST):
         codigo = []
         op = self.operador[1]
         if op in ("<", ">", "<=", ">=", "==", "!="):
+            if _es_float_expr(self.izquierda) or _es_float_expr(self.derecha):
+                codigo.append(_generar_float_operand(self.derecha))
+                codigo.append(_generar_float_operand(self.izquierda))
+                codigo.append("    fcomip st0, st1")
+                codigo.append("    fstp st0")
+                salto = {
+                    "<": "setb",
+                    ">": "seta",
+                    "<=": "setbe",
+                    ">=": "setae",
+                    "==": "sete",
+                    "!=": "setne",
+                }[op]
+                codigo.append(f"    {salto}  al")
+                codigo.append("    movzx  eax, al")
+                return "\n".join(codigo)
             codigo.append(self.izquierda.generarCodigo())
             codigo.append("    push   rax" if ES_WIN64 else "    push   eax")
             codigo.append(self.derecha.generarCodigo())
@@ -286,12 +342,30 @@ class NodoOperacion(NodoAST):
             return "\n".join(codigo)
 
         if self.es_float():
-            codigo.append(self.izquierda.generarCodigo())
-            codigo.append(self.derecha.generarCodigo())
+            codigo.append(_generar_float_operand(self.izquierda))
+            codigo.append(_generar_float_operand(self.derecha))
             if op == "+": codigo.append("    faddp               ; ST(1)+ST(0), pop")
-            elif op == "-": codigo.append("    fsubrp              ; ST(1)-ST(0), pop")
+            elif op == "-": codigo.append("    fsubp               ; ST(1)-ST(0), pop")
             elif op == "*": codigo.append("    fmulp               ; ST(1)*ST(0), pop")
-            elif op == "/": codigo.append("    fdivrp              ; ST(1)/ST(0), pop")
+            elif op == "/":
+                ok_lbl, zero_lbl, fin_lbl = self._nuevo_div_guard()
+                codigo += [
+                    "    fldz",
+                    "    fcomip st0, st1",
+                    f"    jne {ok_lbl}",
+                    f"{zero_lbl}:",
+                    "    fstp st0",
+                    "    fstp st0",
+                    "    lea rcx, [rel msg_div_zero]" if ES_WIN64 else "    push msg_div_zero",
+                    "    call printf",
+                    "    xor ecx, ecx" if ES_WIN64 else "    add esp, 4",
+                    "    call fflush" if ES_WIN64 else "    push 0",
+                    "    fldz" if ES_WIN64 else "    call fflush",
+                    f"    jmp {fin_lbl}" if ES_WIN64 else "    add esp, 4",
+                ]
+                if not ES_WIN64:
+                    codigo += ["    fldz", f"    jmp {fin_lbl}"]
+                codigo += [f"{ok_lbl}:", "    fdivp               ; ST(1)/ST(0), pop", f"{fin_lbl}:"]
         else:
             codigo.append(self.izquierda.generarCodigo())
             codigo.append("    push   rax" if ES_WIN64 else "    push   eax")
@@ -303,8 +377,28 @@ class NodoOperacion(NodoAST):
             elif op == "-": codigo.append(f"    sub    eax, {derecha}")
             elif op == "*": codigo.append(f"    imul   eax, {derecha}")
             elif op == "/":
-                codigo.append("    xor    edx, edx")
+                ok_lbl, zero_lbl, fin_lbl = self._nuevo_div_guard()
+                codigo.append(f"    cmp    {derecha}, 0")
+                codigo.append(f"    jne    {ok_lbl}")
+                codigo.append(f"{zero_lbl}:")
+                if ES_WIN64:
+                    codigo.append("    lea rcx, [rel msg_div_zero]")
+                    codigo.append("    call printf")
+                    codigo.append("    xor ecx, ecx")
+                    codigo.append("    call fflush")
+                else:
+                    codigo.append("    push msg_div_zero")
+                    codigo.append("    call printf")
+                    codigo.append("    add esp, 4")
+                    codigo.append("    push 0")
+                    codigo.append("    call fflush")
+                    codigo.append("    add esp, 4")
+                codigo.append("    xor    eax, eax")
+                codigo.append(f"    jmp    {fin_lbl}")
+                codigo.append(f"{ok_lbl}:")
+                codigo.append("    cdq")
                 codigo.append(f"    idiv   {derecha}")
+                codigo.append(f"{fin_lbl}:")
         return "\n".join(codigo)
 
     def optimizar(self):
@@ -328,20 +422,29 @@ class NodoOperacion(NodoAST):
                 v = v_izq / v_der
             else:
                 return NodoOperacion(izq, self.operador, der)
-            tok = "FLOAT" if "." in str(v) else "INTEGER"
+            ambos_enteros = not izq.es_float() and not der.es_float()
+            tok = "INTEGER" if ambos_enteros and op != "/" and float(v).is_integer() else "FLOAT"
             return NodoNumero((tok, str(int(v) if tok == "INTEGER" else v)))
 
         op = self.operador[1]
+        if isinstance(der, NodoNumero) and float(der.valor[1]) == 0 and op == "/":
+            raise Exception("Division por cero detectada en tiempo de compilacion")
         # Multiplicar por 1
         if isinstance(der, NodoNumero) and float(der.valor[1]) == 1 and op == "*": return izq
         if isinstance(izq, NodoNumero) and float(izq.valor[1]) == 1 and op == "*": return der
         # Sumar 0
         if isinstance(der, NodoNumero) and float(der.valor[1]) == 0 and op == "+": return izq
         if isinstance(izq, NodoNumero) and float(izq.valor[1]) == 0 and op == "+": return der
+        if isinstance(der, NodoNumero) and float(der.valor[1]) == 0 and op == "-": return izq
+        if isinstance(izq, NodoNumero) and float(izq.valor[1]) == 0 and op == "*": return izq
+        if isinstance(der, NodoNumero) and float(der.valor[1]) == 0 and op == "*": return der
+        if isinstance(der, NodoNumero) and float(der.valor[1]) == 1 and op == "/": return izq
         # División por cero
         if isinstance(der, NodoNumero) and float(der.valor[1]) == 0 and op == "/":
             raise Exception("Error: división por cero en tiempo de compilación")
 
+        if izq is self.izquierda and der is self.derecha:
+            return self
         return NodoOperacion(izq, self.operador, der)
 
     def traducirPy(self):
@@ -427,9 +530,10 @@ class NodoNumero(NodoAST):
         if self.es_float():
             safe    = self.valor[1].replace(".", "_")
             etq     = f"__flt_{safe}"
+            ref     = f"rel {etq}" if ES_WIN64 else etq
             lineas  = [
                 f"    ; [FLOAT_CONST] {etq} dq {self.valor[1]}",
-                f"    fld  qword [{etq}]  ; carga {self.valor[1]} en ST(0)",
+                f"    fld  qword [{ref}]  ; carga {self.valor[1]} en ST(0)",
             ]
             return "\n".join(lineas)
         return f"\n    mov eax, {self.valor[1]}"
@@ -607,7 +711,12 @@ class NodoImprimir(NodoAST):
                 codigo.append(f"    lea rcx, [rel {arg.etiqueta}]")
             elif arg:
                 codigo.append(arg.generarCodigo())
-                if getattr(arg, '_tipo', None) == "string":
+                if _es_float_expr(arg):
+                    codigo.append("    fstp qword [rel __float_print_tmp]")
+                    codigo.append("    movsd xmm1, qword [rel __float_print_tmp]")
+                    codigo.append("    mov rdx, [rel __float_print_tmp]")
+                    codigo.append("    lea rcx, [rel fmt_float]")
+                elif getattr(arg, '_tipo', None) == "string":
                     codigo.append("    mov rdx, rax")
                     codigo.append("    lea rcx, [rel fmt_str]")
                 else:
@@ -630,16 +739,23 @@ class NodoImprimir(NodoAST):
         else:
             if arg:
                 codigo.append(arg.generarCodigo())
-                codigo.append("    push eax")
+                if _es_float_expr(arg):
+                    codigo.append("    fstp qword [__float_print_tmp]")
+                    codigo.append("    push dword [__float_print_tmp + 4]")
+                    codigo.append("    push dword [__float_print_tmp]")
+                else:
+                    codigo.append("    push eax")
             
             tipo_arg = getattr(arg, '_tipo', None)
-            if tipo_arg == "string":
+            if _es_float_expr(arg):
+                codigo.append(f"    push fmt_float")
+            elif tipo_arg == "string":
                 codigo.append(f"    push fmt_str")
             else:
                 codigo.append(f"    push fmt_int")
                 
             codigo.append(f"    call printf")
-            codigo.append(f"    add esp, {8 if arg else 4}")
+            codigo.append(f"    add esp, {12 if _es_float_expr(arg) else (8 if arg else 4)}")
             
         if self.tipo[1] == "puts":
             codigo.append(f"    push fmt_nl")
